@@ -6,7 +6,13 @@ export async function GET(request: NextRequest) {
   const code = source.get("code");
   const state = source.get("state");
   const page = state?.startsWith("signin.") ? "/sign-in" : "/sign-up";
-  const destination = new URL(page, request.url);
+  // `request.url` is the container-local URL behind the Azure proxy; rebuild from forwarded headers.
+  const forwardedHost = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  const candidate = forwardedHost ?? request.nextUrl.host;
+  const host = /^[a-z0-9.-]+$/.test(candidate) && !candidate.startsWith("localhost") && !candidate.startsWith("127.")
+    ? candidate
+    : request.nextUrl.host;
+  const destination = new URL(`https://${host}${page}`);
 
   if (error || !code || !state) {
     destination.searchParams.set("error", "oauth_failed");
