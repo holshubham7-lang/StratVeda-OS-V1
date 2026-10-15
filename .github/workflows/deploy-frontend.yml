@@ -1,0 +1,44 @@
+name: Deploy frontend
+
+on:
+  push:
+    branches: [development]
+    paths:
+      - "app/frontend/**"
+      - ".github/workflows/deploy-frontend.yml"
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app/frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: app/frontend
+        env:
+          NEXT_PUBLIC_API_BASE_URL: https://revops-api-dev.azurewebsites.net/api
+        run: npm run build
+
+      - name: Trim build output for deployment
+        working-directory: app/frontend
+        run: |
+          rm -rf .next/cache
+          npm prune --omit=dev
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: revops-frontend-dev
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: app/frontend
