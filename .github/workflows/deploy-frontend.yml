@@ -27,7 +27,7 @@ jobs:
       - name: Build
         working-directory: app/frontend
         env:
-          NEXT_PUBLIC_API_BASE_URL: https://revops-api-dev.azurewebsites.net/api
+          NEXT_PUBLIC_API_BASE_URL: https://revops-frontend-dev.azurewebsites.net/backend-api
         run: npm run build
 
       - name: Trim build output for deployment
