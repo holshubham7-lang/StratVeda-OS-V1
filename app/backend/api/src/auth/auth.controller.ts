@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import { SocialSignupDto } from './dto/social-signup.dto';
 import { ActivityRequestMetadata, AuthService } from './auth.service';
+import { authCookieBaseOptions, authCookieOptions } from './auth-cookie-options';
 import { LinkedInCodeDto } from './dto/linkedin-code.dto';
 import { GoogleCodeDto } from './dto/google-code.dto';
 import { MicrosoftCodeDto } from './dto/microsoft-code.dto';
@@ -54,13 +55,7 @@ export class AuthController {
   constructor(private readonly auth: AuthService, private readonly config: ConfigService) {}
 
   private completeLogin(result: { accessToken: string; expiresIn: number }, response: Response) {
-    response.cookie('ri_access_token', result.accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-      maxAge: result.expiresIn * 1000,
-    });
+    response.cookie('ri_access_token', result.accessToken, authCookieOptions(result.expiresIn * 1000));
     return { status: true, message: 'Logged in successfully' };
   }
 
@@ -153,12 +148,7 @@ export class AuthController {
   ) {
     this.assertTrustedOrigin(origin);
     const auth = request.auth!;
-    response.clearCookie('ri_access_token', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-    });
+    response.clearCookie('ri_access_token', authCookieBaseOptions());
     return this.auth.logout(auth.jti, auth.exp).then(() => ({ status: true, message: 'Logged out successfully' }));
   }
 
