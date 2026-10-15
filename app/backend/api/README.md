@@ -6,6 +6,8 @@ NestJS API for social and manual signup. MongoDB uses the `revenue-intelligence`
 
 Copy `.env.example` to `.env`, provide the OAuth client IDs and secrets and a random `JWT_SECRET` of at least 32 characters, and start MongoDB. Google uses the authorization-code flow, so set `GOOGLE_CLIENT_SECRET` from the same Google OAuth web client as `GOOGLE_CLIENT_ID`. The connection URI defaults to `mongodb://127.0.0.1:27017/revenue-intelligence`; the database name is explicitly set to `revenue-intelligence` even when a different URI is used.
 
+For local HTTP development, keep `COOKIE_SAMESITE=lax` and `COOKIE_SECURE=false`. When the frontend and API use different `azurewebsites.net` hostnames, set the API app settings to `COOKIE_SAMESITE=none` and `COOKIE_SECURE=true` so browsers can send the session cookie on credentialed cross-site requests. `SameSite=None` cookies require HTTPS.
+
 Configure each provider to issue OpenID Connect ID tokens to this application. Google and Microsoft client IDs should match their configured web application. LinkedIn must have OpenID Connect enabled. The API validates signature, issuer, audience, and expiry before creating an account. Never send provider client secrets to the browser. Google, Microsoft, and LinkedIn authorization codes are exchanged by the API using server-side client secrets; configure each exact redirect URI with its provider.
 
 ## Signup endpoint

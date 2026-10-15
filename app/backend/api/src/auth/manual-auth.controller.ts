@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { ActivityRequestMetadata, AuthService } from './auth.service';
+import { authCookieOptions } from './auth-cookie-options';
 import { ManualSigninDto } from './dto/manual-signin.dto';
 import { ManualSignupDto } from './dto/manual-signup.dto';
 
@@ -24,13 +25,7 @@ export class ManualAuthController {
   }
 
   private completeLogin(result: { accessToken: string; expiresIn: number }, response: Response) {
-    response.cookie('ri_access_token', result.accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-      maxAge: result.expiresIn * 1000,
-    });
+    response.cookie('ri_access_token', result.accessToken, authCookieOptions(result.expiresIn * 1000));
     return { status: true, message: 'Logged in successfully' };
   }
 
