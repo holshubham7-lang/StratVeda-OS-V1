@@ -47,7 +47,6 @@ jobs:
           package: app/frontend
           clean: true
           restart: true
-          startup-command: npm start
 
       - name: Verify deployed build and footer
         shell: bash
