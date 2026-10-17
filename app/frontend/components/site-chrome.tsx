@@ -87,7 +87,6 @@ export function Footer() {
         <div className="footer-link-column footer-social-column">
           <h2>FOLLOW US</h2>
           <SocialLinks/>
-          <a href="mailto:hello@stratvedatech.com">hello@stratvedatech.com</a>
         </div>
       </div>
       <div className="footer-bottom page-width">
