@@ -1,10 +1,10 @@
 # Decision Intelligence API
 
-NestJS API for social and manual signup. MongoDB uses the `revenue-intelligence` database, with `users` for accounts, `user_activities` for security activity history, and `company_details` for each user's saved business fingerprint and onboarding step. Mongoose creates unique user identity indexes and a unique sparse index for stored email addresses.
+NestJS API for social and manual signup. MongoDB uses the database selected by `MONGODB_DATABASE` (default `revenue-intelligence`), with `users` for accounts, `user_activities` for security activity history, and `company_details` for each user's saved business fingerprint and onboarding step. Mongoose creates unique user identity indexes and a unique sparse index for stored email addresses.
 
 ## Configure
 
-Copy `.env.example` to `.env`, provide the OAuth client IDs and secrets and a random `JWT_SECRET` of at least 32 characters, and start MongoDB. Google uses the authorization-code flow, so set `GOOGLE_CLIENT_SECRET` from the same Google OAuth web client as `GOOGLE_CLIENT_ID`. The connection URI defaults to `mongodb://127.0.0.1:27017/revenue-intelligence`; the database name is explicitly set to `revenue-intelligence` even when a different URI is used.
+Copy `.env.example` to `.env`, provide the OAuth client IDs and secrets and a random `JWT_SECRET` of at least 32 characters, and start MongoDB. Google uses the authorization-code flow, so set `GOOGLE_CLIENT_SECRET` from the same Google OAuth web client as `GOOGLE_CLIENT_ID`. The connection URI defaults to `mongodb://127.0.0.1:27017/revenue-intelligence`; set `MONGODB_DATABASE=revenue-intelligence-uat` on the UAT API to isolate its data, including when UAT uses the same MongoDB cluster.
 
 For local HTTP development, keep `COOKIE_SAMESITE=lax` and `COOKIE_SECURE=false`. In Azure, the frontend proxies browser API calls through its own origin, so the session cookie is first-party and does not depend on cross-site cookie support. Keep `COOKIE_SECURE=true` in production; `COOKIE_SAMESITE=lax` is sufficient for the same-origin proxy. `SameSite=None` is only needed for direct cross-origin browser requests and requires HTTPS.
 

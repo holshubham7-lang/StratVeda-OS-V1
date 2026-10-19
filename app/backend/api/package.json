@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "build": "nest build",
-    "start": "node scripts/start-api.cjs",
+    "start": "node --use-system-ca dist/main.js",
     "start:dev": "node scripts/start-api.cjs --watch",
     "start:prod": "node --use-system-ca dist/main.js"
   },
