@@ -15,7 +15,7 @@ import { WorkspaceModule } from './workspace/workspace.module';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         uri: config.get<string>('MONGODB_URI', 'mongodb://127.0.0.1:27017/revenue-intelligence'),
-        dbName: 'revenue-intelligence',
+        dbName: config.get<string>('MONGODB_DATABASE', 'revenue-intelligence'),
         autoIndex: true,
       }),
     }),

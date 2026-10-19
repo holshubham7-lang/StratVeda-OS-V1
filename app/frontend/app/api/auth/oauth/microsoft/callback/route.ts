@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getOAuthCallbackOrigin } from "../../callback-origin";
 
 export async function GET(request: NextRequest) {
   const source = request.nextUrl.searchParams;
@@ -6,7 +7,7 @@ export async function GET(request: NextRequest) {
   const code = source.get("code");
   const state = source.get("state");
   const page = state?.startsWith("signin.") ? "/sign-in" : "/sign-up";
-  const destination = new URL(page, request.url);
+  const destination = new URL(page, getOAuthCallbackOrigin(request));
 
   if (error || !code || !state) {
     destination.searchParams.set("error", "oauth_failed");

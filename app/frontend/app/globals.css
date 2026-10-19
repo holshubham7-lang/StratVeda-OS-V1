@@ -337,10 +337,9 @@ html.motion-ready .question-card:nth-child(4).is-visible { animation-delay: 210m
 /* Contact page */
 .contact-page-section { padding-block: 72px 100px; }
 .contact-page-section h1 { margin: 0; color: #18253a; font: 800 clamp(30px,3vw,39px)/1.2 var(--font-display); letter-spacing: -1.45px; }
-.contact-grid { display: grid; grid-template-columns: minmax(0,1.08fr) minmax(0,.92fr); gap: 24px; margin-top: 46px; align-items: start; }
+.contact-grid { display: grid; grid-template-columns: minmax(0,760px); justify-content: center; gap: 24px; margin-top: 46px; align-items: start; }
 .contact-card { padding: 32px 32px 30px; border: 1px solid #e2e9e6; border-radius: 20px; background: #fff; box-shadow: 0 16px 38px rgba(33,62,82,.055); }
 .contact-card h2 { margin: 0 0 22px; color: #17243a; font: 800 19px/1.3 var(--font-display); letter-spacing: -.5px; }
-.contact-card-details { border-left: 3px solid var(--green); }
 .contact-form { display: grid; gap: 8px; }
 .contact-field { display: grid; gap: 6px; }
 .contact-field label { margin-top: 6px; color: #344154; font-size: 11.5px; font-weight: 700; }
@@ -351,12 +350,8 @@ html.motion-ready .question-card:nth-child(4).is-visible { animation-delay: 210m
 .contact-form input:focus,.contact-form textarea:focus { border-color: #6f9d7d; box-shadow: 0 0 0 3px rgba(55,123,89,.12); }
 .contact-form .button { width: 100%; margin-top: 14px; }
 .contact-form-note { margin: 12px 0 0; color: #8b96a3; font-size: 11px; line-height: 1.6; text-align: center; }
-.contact-details { display: grid; gap: 18px; margin: 0; }
-.contact-row dt { color: #4c8966; font-size: 9.5px; font-weight: 800; letter-spacing: 1.5px; }
-.contact-row dd { margin: 5px 0 0; color: #24324a; font-size: 14px; line-height: 1.65; }
-.contact-row dd a { color: var(--green); font-weight: 650; text-decoration: none; border-bottom: 1px solid rgba(55,123,89,.25); }
-.contact-row dd a:hover { color: var(--green-deep); border-bottom-color: currentColor; }
-.contact-address-line { display: block; }
+.contact-form-trap { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.contact-form .button:disabled { opacity: .65; cursor: wait; }
 
 /* Footer */
 .site-footer { border-top: 1px solid #e9eeef; background: #fff; }

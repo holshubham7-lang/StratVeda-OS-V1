@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faInstagram, faLinkedinIn, faXTwitter } from "@fortawesome/free-brands-svg-icons";
+import { faFacebookF, faInstagram, faLinkedinIn, faXTwitter } from "@fortawesome/free-brands-svg-icons";
 import { Icon } from "./icon";
 import { ActiveLink } from "./active-link";
 import { LogoutButton } from "./logout-button";
@@ -68,6 +68,7 @@ function SocialLinks() {
       <a href="https://www.linkedin.com/" aria-label="LinkedIn" title="LinkedIn" target="_blank" rel="noopener noreferrer"><FontAwesomeIcon icon={faLinkedinIn} aria-hidden="true"/></a>
       <a href="https://www.instagram.com/" aria-label="Instagram" title="Instagram" target="_blank" rel="noopener noreferrer"><FontAwesomeIcon icon={faInstagram} aria-hidden="true"/></a>
       <a href="https://x.com/" aria-label="X" title="X" target="_blank" rel="noopener noreferrer"><FontAwesomeIcon icon={faXTwitter} aria-hidden="true"/></a>
+      <a href="https://www.facebook.com/" aria-label="Facebook" title="Facebook" target="_blank" rel="noopener noreferrer"><FontAwesomeIcon icon={faFacebookF} aria-hidden="true"/></a>
     </div>
   );
 }
@@ -86,7 +87,6 @@ export function Footer() {
         <div className="footer-link-column footer-social-column">
           <h2>FOLLOW US</h2>
           <SocialLinks/>
-          <a href="mailto:hello@stratvedatech.com">hello@stratvedatech.com</a>
         </div>
       </div>
       <div className="footer-bottom page-width">

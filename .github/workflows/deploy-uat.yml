@@ -1,0 +1,125 @@
+name: Deploy UAT
+
+on:
+  push:
+    branches: [cybersecurity]
+    paths:
+      - "app/frontend/**"
+      - "app/backend/api/**"
+      - ".github/workflows/deploy-uat.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-uat
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/backend/api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app/backend/api
+        run: npm ci
+
+      - name: Build API
+        working-directory: app/backend/api
+        run: npm run build
+
+      - name: Trim development dependencies
+        working-directory: app/backend/api
+        run: npm prune --omit=dev
+
+      - name: Deploy UAT API to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: revops-api-uat
+          publish-profile: ${{ secrets.AZURE_UAT_API_PUBLISH_PROFILE }}
+          package: app/backend/api
+          clean: true
+          restart: true
+
+  build-and-deploy-frontend:
+    runs-on: ubuntu-latest
+    needs: build-and-deploy-api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app/frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: app/frontend
+        env:
+          NEXT_PUBLIC_API_BASE_URL: https://revops-frontend-uat.azurewebsites.net/backend-api
+        run: npm run build
+
+      - name: Trim build output for deployment
+        working-directory: app/frontend
+        run: |
+          rm -rf .next/cache
+          npm prune --omit=dev
+
+      - name: Stamp deployed commit
+        run: printf '{"commit":"%s"}\n' "$GITHUB_SHA" > app/frontend/public/deployment-version.json
+
+      - name: Deploy UAT frontend to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: revops-frontend-uat
+          publish-profile: ${{ secrets.AZURE_UAT_FRONTEND_PUBLISH_PROFILE }}
+          package: app/frontend
+          clean: true
+          restart: true
+
+      - name: Verify UAT deployment and contact page
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_url="https://revops-frontend-uat.azurewebsites.net"
+          for attempt in $(seq 1 24); do
+            version="$(curl --silent --show-error --fail "$base_url/deployment-version.json?check=$GITHUB_RUN_ID-$attempt" || true)"
+            if [[ "$version" == *"$GITHUB_SHA"* ]]; then
+              break
+            fi
+            if [[ "$attempt" == 24 ]]; then
+              echo "The UAT site did not serve commit $GITHUB_SHA after deployment. Last response: $version"
+              exit 1
+            fi
+            sleep 10
+          done
+
+          page="$(curl --silent --show-error --fail "$base_url/contact?deploy-check=$GITHUB_RUN_ID")"
+          grep -Fq 'Tell us the decision you are working through.' <<< "$page"
+          grep -Fq 'Send a message' <<< "$page"
+          grep -Fq 'name="message"' <<< "$page"
+          grep -Fq 'aria-label="Facebook"' <<< "$page"
+          if grep -Fq 'This form is not connected yet' <<< "$page"; then
+            echo "The UAT contact page is still serving the old disconnected-form notice."
+            exit 1
+          fi
+          if grep -Fq 'Reach us directly' <<< "$page"; then
+            echo "The UAT contact page still contains the retired direct-contact section."
+            exit 1
+          fi
+          if grep -Fq 'mailto:hello@stratvedatech.com' <<< "$page"; then
+            echo "The UAT footer still contains the retired email link."
+            exit 1
+          fi
