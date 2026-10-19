@@ -22,7 +22,6 @@ import { AdminAudit, AdminAuditSchema } from './users/admin-audit.schema';
       useFactory: (config: ConfigService) => ({
         uri: config.getOrThrow<string>('MONGODB_URI'),
         dbName: config.get<string>('MONGODB_DATABASE', 'revenue-intelligence'),
-        tls: config.get<string>('NODE_ENV') === 'production',
         autoIndex: config.get<string>('NODE_ENV') !== 'production',
       }),
     }),
