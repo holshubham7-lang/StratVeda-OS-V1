@@ -1,17 +1,16 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
-  faArrowDown, faArrowRightFromBracket, faArrowTrendUp, faCalendarDays,
-  faCheck, faChevronLeft, faChevronRight, faCircleCheck, faCircleUser,
-  faClock, faEllipsis, faGaugeHigh, faGlobe, faLock,
-  faMagnifyingGlass, faShieldHalved, faUserCheck, faUserGroup, faUserPlus,
-  faUsers, faXmark,
+  faArrowDown, faArrowRight, faArrowRightFromBracket, faArrowUpRightFromSquare,
+  faBars, faCheck, faChevronLeft, faChevronRight, faCircleCheck,
+  faClock, faEllipsis, faFilter, faFingerprint, faGlobe, faMagnifyingGlass,
+  faShieldHalved, faSliders, faUser, faUserCheck, faUserPlus, faUsers, faXmark,
 } from '@fortawesome/free-solid-svg-icons';
-
 import { ApiError, ENV_LABEL, probeHealth, request } from '@/lib/admin-api';
 
+type View = 'overview' | 'users' | 'audit';
 type UserRow = {
   _id: string;
   name?: string;
@@ -20,145 +19,162 @@ type UserRow = {
   emailVerified?: boolean;
   isActive?: boolean;
   createdAt?: string;
+  updatedAt?: string;
   picture?: string;
+  locale?: string;
 };
 type ActivityRow = {
   _id?: string;
   activity: string;
   provider?: string;
   createdAt?: string;
-  user?: { name?: string; email?: string } | null;
   browser?: string;
+  operatingSystem?: string;
+  devicePlatform?: string;
+  user?: { name?: string; email?: string } | null;
 };
 type Overview = {
   metrics: { totalUsers: number; activeUsers: number; newToday: number; signupsLast30Days: number };
   signupsByDay: { date: string; count: number }[];
-  providers: { provider: string; count: number }[];
+  providers: { provider?: string; count: number }[];
   recentUsers: UserRow[];
   recentActivity: ActivityRow[];
 };
-type PageData = { items: UserRow[]; pagination: { page: number; limit: number; total: number; pages: number } };
-type Detail = { user: UserRow & { updatedAt?: string; locale?: string }; activities: ActivityRow[] };
-type AuditRow = { actor: string; action: string; targetUserId: string; createdAt: string; targetName?: string; targetEmail?: string; targetActive?: boolean | null; targetExists: boolean };
-type AuditPage = { items: AuditRow[]; pagination: PageData['pagination'] };
+type PageResult<T> = { items: T[]; pagination: { page: number; limit: number; total: number; pages: number } };
+type UserDetail = { user: UserRow; activities: ActivityRow[] };
+type AuditRow = {
+  actor: string;
+  action: string;
+  targetUserId: string;
+  createdAt: string;
+  ipAddress?: string;
+  targetName?: string;
+  targetEmail?: string;
+  targetActive?: boolean | null;
+  targetExists: boolean;
+};
+type AuditResult = PageResult<AuditRow>;
 
-function initials(name?: string, email?: string) {
-  const value = name?.trim() || email?.split('@')[0] || 'U';
-  return value.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((part) => part[0].toUpperCase()).join('');
-}
-function prettyName(value?: string) {
-  if (!value) return 'Unknown';
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-function dateLabel(value?: string) {
+const formatNumber = (value: number) => new Intl.NumberFormat('en').format(value);
+const dateLabel = (value?: string, options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' }) => {
   if (!value) return '—';
-  return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(value));
-}
-function relativeTime(value?: string) {
-  if (!value) return 'Recently';
-  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
-  if (seconds < 60) return 'Just now';
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  return `${Math.floor(seconds / 86400)}d ago`;
-}
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat('en', options).format(date);
+};
+const shortName = (value?: string, email?: string) => {
+  const source = value?.trim() || email?.split('@')[0] || 'User';
+  return source.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((piece) => piece[0].toUpperCase()).join('');
+};
+const titleCase = (value?: string) => value ? value.replace(/[._-]/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) : 'Unknown';
+const relativeTime = (value?: string) => {
+  if (!value) return 'Time not recorded';
+  const elapsed = Math.max(0, Date.now() - new Date(value).getTime());
+  if (!Number.isFinite(elapsed)) return 'Time not recorded';
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+};
 
 export default function AdminHome() {
+  const [view, setView] = useState<View>('overview');
   const [authenticated, setAuthenticated] = useState(false);
-  const [checking, setChecking] = useState(true);
-  const [email, setEmail] = useState('');
+  const [checkingSession, setCheckingSession] = useState(true);
+  const [adminEmail, setAdminEmail] = useState('');
   const [loginEmail, setLoginEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loginError, setLoginError] = useState('');
   const [loginBusy, setLoginBusy] = useState(false);
-  const [view, setView] = useState<'overview' | 'users' | 'audit'>('overview');
-  const [overview, setOverview] = useState<Overview | null>(null);
-  const [users, setUsers] = useState<PageData | null>(null);
-  const [audit, setAudit] = useState<AuditPage | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [loginError, setLoginError] = useState('');
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [health, setHealth] = useState<'checking' | 'ready' | 'down'>('checking');
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [users, setUsers] = useState<PageResult<UserRow> | null>(null);
+  const [audit, setAudit] = useState<AuditResult | null>(null);
   const [search, setSearch] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [providerFilter, setProviderFilter] = useState('all');
-  const [limit, setLimit] = useState(10);
+  const [status, setStatus] = useState('all');
+  const [provider, setProvider] = useState('all');
+  const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
   const [auditAction, setAuditAction] = useState('all');
   const [auditSearch, setAuditSearch] = useState('');
   const [auditSearchQuery, setAuditSearchQuery] = useState('');
-  const [selectedUser, setSelectedUser] = useState<Detail | null>(null);
+  const [selectedUser, setSelectedUser] = useState<UserDetail | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
-  const [health, setHealth] = useState<'checking' | 'ok' | 'down'>('checking');
-
-  useEffect(() => {
-    if (!authenticated) return;
-    let active = true;
-    const check = () => void probeHealth().then((ok) => { if (active) setHealth(ok ? 'ok' : 'down'); });
-    check();
-    const timer = window.setInterval(check, 60_000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [authenticated]);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const requestSequence = useRef(0);
+  const closeUserDrawer = useCallback(() => { setSelectedUser(null); setDetailBusy(false); }, []);
 
   useEffect(() => {
     request<{ status: boolean; email: string }>('/admin/auth/session')
-      .then((result) => { setEmail(result.email); setAuthenticated(true); })
+      .then((result) => { setAdminEmail(result.email); setAuthenticated(true); })
       .catch(() => setAuthenticated(false))
-      .finally(() => setChecking(false));
+      .finally(() => setCheckingSession(false));
   }, []);
 
-  const resetToLogin = useCallback(() => {
-    setAuthenticated(false); setEmail(''); setOverview(null); setUsers(null); setAudit(null); setSelectedUser(null);
-    setDetailBusy(false); setPage(1); setSearch(''); setSearchQuery('');
-    setStatusFilter('all'); setProviderFilter('all'); setLimit(10); setAuditAction('all'); setAuditSearch(''); setAuditSearchQuery('');
+  useEffect(() => {
+    if (!authenticated) return;
+    let alive = true;
+    const check = () => void probeHealth().then((ok) => { if (alive) setHealth(ok ? 'ready' : 'down'); });
+    check();
+    const timer = window.setInterval(check, 60_000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, [authenticated]);
+
+  const clearPrivateState = useCallback(() => {
+    setAuthenticated(false); setAdminEmail(''); setOverview(null); setUsers(null); setAudit(null); setSelectedUser(null);
+    setPage(1); setSearch(''); setSearchQuery(''); setStatus('all'); setProvider('all'); setPageSize(10);
+    setAuditAction('all'); setAuditSearch(''); setAuditSearchQuery('');
   }, []);
 
-  const handleFailure = useCallback((err: unknown, fallback: string) => {
-    if (err instanceof ApiError && err.status === 401) {
-      setError(err.message);
-      resetToLogin();
+  const handleError = useCallback((reason: unknown, fallback: string) => {
+    if (reason instanceof ApiError && reason.status === 401) {
+      setLoginError('Your secure session has ended. Sign in again to continue.');
+      clearPrivateState();
       return;
     }
-    setError(err instanceof Error ? err.message : fallback);
-  }, [resetToLogin]);
-
-  const loadSeq = useRef(0);
+    setError(reason instanceof Error ? reason.message : fallback);
+  }, [clearPrivateState]);
 
   const loadOverview = useCallback(async () => {
-    const seq = ++loadSeq.current;
+    const sequence = ++requestSequence.current;
     setBusy(true); setError('');
     try {
       const data = await request<Overview>('/admin/overview');
-      if (seq === loadSeq.current) setOverview(data);
-    } catch (err) { if (seq === loadSeq.current) handleFailure(err, 'Unable to load the overview.'); }
-    finally { if (seq === loadSeq.current) setBusy(false); }
-  }, [handleFailure]);
+      if (sequence === requestSequence.current) setOverview(data);
+    } catch (reason) { if (sequence === requestSequence.current) handleError(reason, 'The overview could not be loaded.'); }
+    finally { if (sequence === requestSequence.current) setBusy(false); }
+  }, [handleError]);
 
   const loadUsers = useCallback(async () => {
-    const seq = ++loadSeq.current;
+    const sequence = ++requestSequence.current;
     setBusy(true); setError('');
-    const query = new URLSearchParams({ page: String(page), limit: String(limit) });
-    if (searchQuery) query.set('search', searchQuery);
-    if (statusFilter !== 'all') query.set('status', statusFilter);
-    if (providerFilter !== 'all') query.set('provider', providerFilter);
+    const params = new URLSearchParams({ page: String(page), limit: String(pageSize) });
+    if (searchQuery) params.set('search', searchQuery);
+    if (status !== 'all') params.set('status', status);
+    if (provider !== 'all') params.set('provider', provider);
     try {
-      const data = await request<PageData>(`/admin/users?${query.toString()}`);
-      if (seq === loadSeq.current) setUsers(data);
-    } catch (err) { if (seq === loadSeq.current) handleFailure(err, 'Unable to load users.'); }
-    finally { if (seq === loadSeq.current) setBusy(false); }
-  }, [handleFailure, limit, page, providerFilter, searchQuery, statusFilter]);
+      const data = await request<PageResult<UserRow>>(`/admin/users?${params.toString()}`);
+      if (sequence === requestSequence.current) setUsers(data);
+    } catch (reason) { if (sequence === requestSequence.current) handleError(reason, 'The account directory could not be loaded.'); }
+    finally { if (sequence === requestSequence.current) setBusy(false); }
+  }, [handleError, page, pageSize, provider, searchQuery, status]);
 
   const loadAudit = useCallback(async () => {
-    const seq = ++loadSeq.current;
+    const sequence = ++requestSequence.current;
     setBusy(true); setError('');
-    const query = new URLSearchParams({ page: String(page), limit: '10' });
-    if (auditAction !== 'all') query.set('action', auditAction);
-    if (auditSearchQuery) query.set('search', auditSearchQuery);
+    const params = new URLSearchParams({ page: String(page), limit: '10' });
+    if (auditAction !== 'all') params.set('action', auditAction);
+    if (auditSearchQuery) params.set('search', auditSearchQuery);
     try {
-      const data = await request<AuditPage>(`/admin/audit?${query.toString()}`);
-      if (seq === loadSeq.current) setAudit(data);
-    } catch (err) { if (seq === loadSeq.current) handleFailure(err, 'Unable to load audit events.'); }
-    finally { if (seq === loadSeq.current) setBusy(false); }
-  }, [auditAction, auditSearchQuery, handleFailure, page]);
+      const data = await request<AuditResult>(`/admin/audit?${params.toString()}`);
+      if (sequence === requestSequence.current) setAudit(data);
+    } catch (reason) { if (sequence === requestSequence.current) handleError(reason, 'The activity ledger could not be loaded.'); }
+    finally { if (sequence === requestSequence.current) setBusy(false); }
+  }, [auditAction, auditSearchQuery, handleError, page]);
 
   useEffect(() => {
     if (!authenticated) return;
@@ -168,212 +184,217 @@ export default function AdminHome() {
   }, [authenticated, view, loadOverview, loadUsers, loadAudit]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { setPage(1); setSearchQuery(search.trim()); }, 280);
-    return () => window.clearTimeout(timer);
+    const timeout = window.setTimeout(() => { setPage(1); setSearchQuery(search.trim()); }, 260);
+    return () => window.clearTimeout(timeout);
   }, [search]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { setPage(1); setAuditSearchQuery(auditSearch.trim()); }, 280);
-    return () => window.clearTimeout(timer);
+    const timeout = window.setTimeout(() => { setPage(1); setAuditSearchQuery(auditSearch.trim()); }, 260);
+    return () => window.clearTimeout(timeout);
   }, [auditSearch]);
 
-  const submitLogin = async (event: FormEvent<HTMLFormElement>) => {
+  async function signIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setLoginError(''); setLoginBusy(true);
     try {
-      await request('/admin/auth/login', { method: 'POST', body: JSON.stringify({ email: loginEmail, password }) });
-      setEmail(loginEmail.trim().toLowerCase()); setAuthenticated(true); setPassword(''); setView('overview');
-    } catch (err) { setLoginError(err instanceof Error ? err.message : 'Sign in failed. Please try again.'); }
+      await request('/admin/auth/login', { method: 'POST', body: JSON.stringify({ email: loginEmail.trim(), password }) });
+      const result = await request<{ status: boolean; email: string }>('/admin/auth/session');
+      setAdminEmail(result.email); setAuthenticated(true); setPassword('');
+    } catch (reason) { setLoginError(reason instanceof Error ? reason.message : 'Sign in could not be completed.'); }
     finally { setLoginBusy(false); }
-  };
+  }
 
-  const signOut = async () => {
-    try { await request('/admin/auth/logout', { method: 'POST' }); } catch { /* Clear local state even if the network is unavailable. */ }
-    resetToLogin(); setError('');
-  };
+  async function signOut() {
+    try { await request('/admin/auth/logout', { method: 'POST' }); } catch { /* Local private state is cleared even if logout cannot reach the API. */ }
+    clearPrivateState(); setLoginError(''); setError('');
+  }
 
-  const closeDrawer = useCallback(() => { setSelectedUser(null); setDetailBusy(false); }, []);
-
-  const openUser = async (id: string) => {
-    setDetailBusy(true); setSelectedUser(null);
-    try { setSelectedUser(await request<Detail>(`/admin/users/${encodeURIComponent(id)}`)); }
-    catch (err) { handleFailure(err, 'Unable to open this account.'); }
+  async function openUser(id: string) {
+    setSelectedUser(null); setDetailBusy(true); setError('');
+    try { setSelectedUser(await request<UserDetail>(`/admin/users/${encodeURIComponent(id)}`)); }
+    catch (reason) { handleError(reason, 'Account details could not be loaded.'); }
     finally { setDetailBusy(false); }
-  };
+  }
 
-  const changeStatus = async (user: UserRow) => {
-    const action = user.isActive === false ? 'restore access for' : 'disable access for';
-    if (!window.confirm(`Are you sure you want to ${action} ${user.name || user.email || 'this account'}? They will not be able to sign in again, and any session already issued stays valid until its token expires.`)) return;
+  const selectedTitle = useMemo(() => ({ overview: 'Overview', users: 'Accounts', audit: 'Activity ledger' })[view], [view]);
+
+  async function toggleAccount(user: UserRow) {
+    const disabling = user.isActive !== false;
+    const person = user.name?.trim() || user.email || 'this account';
+    const message = disabling
+      ? `Disable access for ${person}? Their existing session remains valid until it expires.`
+      : `Restore access for ${person}? They will be able to sign in again.`;
+    if (!window.confirm(message)) return;
     setBusy(true); setError('');
     try {
-      await request(`/admin/users/${encodeURIComponent(user._id)}/active/${user.isActive === false ? 'true' : 'false'}`, { method: 'PATCH' });
-      if (selectedUser?.user._id === user._id) setSelectedUser(await request<Detail>(`/admin/users/${encodeURIComponent(user._id)}`));
+      await request(`/admin/users/${encodeURIComponent(user._id)}/active/${String(!disabling)}`, { method: 'PATCH' });
+      if (selectedUser?.user._id === user._id) setSelectedUser(await request<UserDetail>(`/admin/users/${encodeURIComponent(user._id)}`));
       if (view === 'users') await loadUsers();
-      if (view === 'overview') await loadOverview();
-      if (view === 'audit') await loadAudit();
-    } catch (err) { handleFailure(err, 'Unable to update the account.'); }
+      else if (view === 'overview') await loadOverview();
+      else await loadAudit();
+    } catch (reason) { handleError(reason, 'Account access could not be changed.'); }
     finally { setBusy(false); }
-  };
+  }
 
-  if (checking) return <main className="login-page" aria-busy="true"><section className="login-card" aria-labelledby="login-title"><div className="login-brand"><div className="brand-mark">S</div><div><div className="brand-name" style={{ color: '#1c3041' }}>StratVeda</div><div className="brand-sub" style={{ color: '#86939e' }}>Revenue operations</div></div></div><div className="eyebrow">Administrator access</div><h1 className="login-title" id="login-title">Welcome back</h1><p className="login-caption">Checking for an existing administrator session…</p><div className="skeleton" style={{ height: 42, marginTop: 20 }} /><div className="skeleton" style={{ height: 42, marginTop: 12 }} /><div className="login-foot"><FontAwesomeIcon icon={faLock} /> Secure administrator session</div></section></main>;
+  if (checkingSession) return <main className="signin-stage" aria-busy="true"><section className="signin-panel"><div className="wordmark"><span className="wordmark-mark">S</span><span>stratveda<span className="wordmark-dot">.</span></span></div><p className="kicker">Administrator access</p><h1>Welcome back.</h1><p className="signin-copy">Checking your administrator session…</p><div className="signin-skeleton" /><div className="signin-skeleton short" /></section></main>;
 
-  if (!authenticated) return <main className="login-page">
-    <section className="login-card" aria-labelledby="login-title">
-      <div className="login-brand"><div className="brand-mark">S</div><div><div className="brand-name" style={{ color: '#1c3041' }}>StratVeda</div><div className="brand-sub" style={{ color: '#86939e' }}>Revenue operations</div></div></div>
-      <div className="eyebrow">Administrator access</div>
-      <h1 className="login-title" id="login-title">Welcome back</h1>
-      <p className="login-caption">Sign in to manage accounts and review platform activity.</p>
-      {loginError && <div className="error-banner" role="alert">{loginError}</div>}
-      {error && !loginError && <div className="error-banner" role="status">{error}</div>}
-      <form className="login-form" onSubmit={submitLogin}>
-        <div className="form-field"><label htmlFor="admin-email">Email address</label><input id="admin-email" type="email" autoComplete="username" required maxLength={254} placeholder="you@company.com" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} /></div>
-        <div className="form-field"><label htmlFor="admin-password">Password</label><input id="admin-password" type="password" autoComplete="current-password" required maxLength={256} placeholder="Enter your password" value={password} onChange={(event) => setPassword(event.target.value)} /></div>
-        <button className="primary-button login-submit" type="submit" disabled={loginBusy}>{loginBusy ? <><span className="spinner" />Signing in…</> : <>Sign in <FontAwesomeIcon icon={faArrowDown} rotation={270} /></>}</button>
-      </form>
-      <div className="login-foot"><FontAwesomeIcon icon={faLock} /> Secure administrator session</div>
-      <div className="login-note">Access is limited to authorized administrators.</div>
+  if (!authenticated) return <main className="signin-stage">
+    <section className="signin-poster">
+      <div className="poster-top"><div className="wordmark light"><span className="wordmark-mark">S</span><span>stratveda<span className="wordmark-dot">.</span></span></div><span className="poster-tag"><span className="live-dot" /> PRIVATE ENVIRONMENT</span></div>
+      <div className="poster-copy"><p className="kicker light-kicker">REVOPS · ADMINISTRATION</p><h1>Clarity for the people behind the numbers.</h1><p>One considered workspace for understanding your user base, reviewing account activity, and managing access responsibly.</p></div>
+      <div className="poster-stats"><div><strong>01</strong><span>Understand<br />the user base</span></div><div><strong>02</strong><span>Review<br />account activity</span></div><div><strong>03</strong><span>Manage access<br />with care</span></div></div>
+      <div className="poster-orbit orbit-one" /><div className="poster-orbit orbit-two" /><div className="poster-orbit orbit-three" />
+      <p className="poster-foot">STRATVEDA <span>·</span> REVENUE OPERATIONS</p>
     </section>
+    <section className="signin-panel-wrap"><div className="signin-panel">
+      <p className="kicker">ADMINISTRATOR ACCESS</p><h2>Sign in to your workspace</h2><p className="signin-copy">Use the administrator credentials assigned to this environment.</p>
+      {loginError && <div className="notice error-notice" role="alert">{loginError}</div>}
+      <form className="signin-form" onSubmit={signIn}>
+        <label htmlFor="admin-email">Work email</label><div className="input-wrap"><FontAwesomeIcon icon={faUser} /><input id="admin-email" type="email" autoComplete="username" required maxLength={254} placeholder="name@company.com" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} /></div>
+        <label htmlFor="admin-password">Password</label><div className="input-wrap"><FontAwesomeIcon icon={faFingerprint} /><input id="admin-password" type="password" autoComplete="current-password" required maxLength={256} placeholder="Enter your password" value={password} onChange={(event) => setPassword(event.target.value)} /></div>
+        <button className="button primary signin-button" type="submit" disabled={loginBusy || !loginEmail || !password}>{loginBusy ? 'Signing in…' : <>Enter the console <FontAwesomeIcon icon={faArrowRight} /></>}</button>
+      </form>
+      <div className="signin-security"><FontAwesomeIcon icon={faShieldHalved} /><span>Protected administrator session</span></div>
+    </div><p className="signin-help">Access is limited to authorized administrators. Contact your system owner if you need help signing in.</p></section>
   </main>;
 
-  return <div className="shell">
-    <aside className="sidebar" aria-label="Main navigation">
-      <div className="brand"><div className="brand-mark">S</div><div className="brand-copy"><div className="brand-name">StratVeda</div><div className="brand-sub">RevOps console</div></div></div>
-      <div className="nav-label">Workspace</div>
-      <nav className="nav-list">
-        <button className={`nav-item ${view === 'overview' ? 'active' : ''}`} aria-current={view === 'overview' ? 'page' : undefined} onClick={() => { setView('overview'); setPage(1); }}><span className="nav-icon"><FontAwesomeIcon icon={faGaugeHigh} /></span><span>Overview</span></button>
-        <button className={`nav-item ${view === 'users' ? 'active' : ''}`} aria-current={view === 'users' ? 'page' : undefined} onClick={() => { setView('users'); setPage(1); }}><span className="nav-icon"><FontAwesomeIcon icon={faUsers} /></span><span>Users</span></button>
-        <button className={`nav-item ${view === 'audit' ? 'active' : ''}`} aria-current={view === 'audit' ? 'page' : undefined} onClick={() => { setView('audit'); setPage(1); }}><span className="nav-icon"><FontAwesomeIcon icon={faShieldHalved} /></span><span>Admin activity</span></button>
+  return <div className="app-frame">
+    <header className="topbar">
+      <a className="wordmark" href="#overview" onClick={(event) => { event.preventDefault(); setView('overview'); }} aria-label="StratVeda operations home"><span className="wordmark-mark">S</span><span>stratveda<span className="wordmark-dot">.</span></span></a>
+      <div className="topbar-divider" />
+      <div className="workspace-name"><span className="workspace-eyebrow">REVENUE OPERATIONS</span><span>Administration</span></div>
+      <nav className={`primary-nav ${mobileMenuOpen ? 'open' : ''}`} aria-label="Main navigation">
+        {(['overview', 'users', 'audit'] as View[]).map((item) => <button key={item} className={`nav-link ${view === item ? 'active' : ''}`} aria-current={view === item ? 'page' : undefined} onClick={() => { setView(item); setPage(1); setMobileMenuOpen(false); }}>{item === 'users' ? 'Accounts' : item === 'audit' ? 'Activity ledger' : 'Overview'}</button>)}
       </nav>
-      <div className="sidebar-spacer" />
-      <div className="workspace-card"><div className="workspace-heading">Environment</div><div className="workspace-status"><span className={`pulse ${health === 'ok' ? '' : health === 'down' ? 'down' : 'idle'}`} />{ENV_LABEL}</div><p className="workspace-note" role="status">{health === 'checking' ? 'Checking admin service…' : health === 'ok' ? 'Admin service reachable' : 'Admin service unreachable'}</p></div>
-      <div className="sidebar-footer"><div className="avatar">{initials(email)}</div><div className="footer-copy"><div className="footer-name">{email}</div><div className="footer-role">Administrator</div></div></div>
-    </aside>
+      <div className="topbar-actions"><span className={`service-state ${health}`}><i />{health === 'checking' ? 'Connecting' : health === 'ready' ? 'Services online' : 'Service unavailable'}</span><button className="account-menu" onClick={signOut} aria-label={`Sign out ${adminEmail}`}><span className="account-avatar">{shortName(undefined, adminEmail)}</span><span className="account-name">{adminEmail}</span><FontAwesomeIcon icon={faArrowRightFromBracket} /></button><button className="mobile-menu-button" aria-label={mobileMenuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen((open) => !open)}><FontAwesomeIcon icon={mobileMenuOpen ? faXmark : faBars} /></button></div>
+    </header>
 
-    <main className="main">
-      <header className="topbar">
-        <div className="breadcrumb"><span>RevOps</span><span>/</span><strong>{view === 'overview' ? 'Overview' : view === 'users' ? 'Users' : 'Admin activity'}</strong></div>
-        <div className="top-actions"><div className="top-divider" /><div className="top-profile"><div className="avatar">{initials(email)}</div><div><div className="profile-email">{email}</div><div className="profile-caption">Administrator</div></div></div><button className="icon-button" aria-label="Sign out" title="Sign out" onClick={signOut}><FontAwesomeIcon icon={faArrowRightFromBracket} /></button></div>
-      </header>
-
-      <div className="content">
-        {error && <div className="error-banner" role="alert">{error}</div>}
-        {view === 'overview' && <OverviewView overview={overview} busy={busy} onViewUsers={() => setView('users')} onOpenUser={openUser} />}
-        {view === 'users' && <UsersView data={users} busy={busy} error={error} search={search} setSearch={setSearch} status={statusFilter} setStatus={(value) => { setStatusFilter(value); setPage(1); }} provider={providerFilter} setProvider={(value) => { setProviderFilter(value); setPage(1); }} limit={limit} setLimit={(value) => { setLimit(value); setPage(1); }} page={page} setPage={setPage} onOpenUser={openUser} onToggleStatus={changeStatus} />}
-        {view === 'audit' && <AuditView data={audit} busy={busy} error={error} action={auditAction} setAction={(value) => { setAuditAction(value); setPage(1); }} search={auditSearch} setSearch={setAuditSearch} page={page} setPage={setPage} onOpenUser={openUser} />}
-      </div>
+    <main className="content-wrap">
+      <div className="breadcrumb"><span>Workspace</span><span className="crumb-slash">/</span><span>{selectedTitle}</span><span className="environment-tag">{ENV_LABEL}</span></div>
+      {error && <div className="notice error-notice" role="alert">{error}<button aria-label="Dismiss message" onClick={() => setError('')}><FontAwesomeIcon icon={faXmark} /></button></div>}
+      {view === 'overview' && <OverviewView data={overview} busy={busy} onOpenUser={openUser} onViewUsers={() => { setPage(1); setView('users'); }} />}
+      {view === 'users' && <UsersView data={users} busy={busy} error={error} search={search} setSearch={setSearch} status={status} setStatus={(value) => { setStatus(value); setPage(1); }} provider={provider} setProvider={(value) => { setProvider(value); setPage(1); }} page={page} setPage={setPage} pageSize={pageSize} setPageSize={(value) => { setPageSize(value); setPage(1); }} onOpenUser={openUser} />}
+      {view === 'audit' && <AuditView data={audit} busy={busy} error={error} action={auditAction} setAction={(value) => { setAuditAction(value); setPage(1); }} search={auditSearch} setSearch={setAuditSearch} page={page} setPage={setPage} onOpenUser={openUser} />}
+      <footer className="page-footer"><span>STRATVEDA <b>·</b> OPERATIONS CONSOLE</span><span>Administrative actions are recorded in the audit ledger.</span></footer>
     </main>
 
-    {(detailBusy || selectedUser) && <UserDrawer detail={selectedUser} loading={detailBusy} onClose={closeDrawer} onToggleStatus={changeStatus} />}
+    {(detailBusy || selectedUser) && <AccountDrawer detail={selectedUser} loading={detailBusy} onClose={closeUserDrawer} onToggle={toggleAccount} />}
   </div>;
 }
 
-function OverviewView({ overview, busy, onViewUsers, onOpenUser }: { overview: Overview | null; busy: boolean; onViewUsers: () => void; onOpenUser: (id: string) => void }) {
-  const metrics = overview?.metrics;
+function SectionHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) {
+  return <div className="section-heading"><div><p className="kicker">{eyebrow}</p><h1>{title}</h1><p className="section-description">{description}</p></div>{action}</div>;
+}
+
+function OverviewView({ data, busy, onOpenUser, onViewUsers }: { data: Overview | null; busy: boolean; onOpenUser: (id: string) => void; onViewUsers: () => void }) {
+  const metrics = data?.metrics;
+  const activeRate = metrics?.totalUsers ? Math.round((metrics.activeUsers / metrics.totalUsers) * 100) : 0;
   return <>
-    <div className="heading-row"><div><div className="eyebrow">Your platform at a glance</div><h1 className="page-title">Good day, Admin</h1><p className="page-description">Here&apos;s what&apos;s happening across your RevOps workspace.</p></div><div className="date-chip"><FontAwesomeIcon icon={faCalendarDays} /> Last 30 days</div></div>
-    <div className="metrics-grid">
-      <Metric label="Total users" value={metrics?.totalUsers} foot="All registered accounts" icon={faUserGroup} tone="teal" />
-      <Metric label="Active accounts" value={metrics?.activeUsers} foot="Currently enabled" icon={faUserCheck} tone="green" />
-      <Metric label="New today" value={metrics?.newToday} foot="Accounts created today" icon={faUserPlus} tone="blue" />
-      <Metric label="Signups this month" value={metrics?.signupsLast30Days} foot="Last 30 days" icon={faArrowTrendUp} tone="amber" />
-    </div>
-    <div className="content-grid">
-      <section className="panel" aria-labelledby="signup-title"><div className="panel-head"><div><h2 className="panel-title" id="signup-title">User growth</h2><p className="panel-subtitle">New accounts created over the last 30 days</p></div><span className="date-chip"><span className="pulse" style={{ width: 6, height: 6 }} /> Signups</span></div>{overview ? <SignupChart data={overview.signupsByDay} /> : <div className="chart-wrap"><div className="skeleton" style={{ height: 180 }} /></div>}<div className="legend-row"><span>Daily signups</span><span>{metrics?.signupsLast30Days ?? '—'} total</span></div></section>
-      <section className="panel" aria-labelledby="provider-title"><div className="panel-head"><div><h2 className="panel-title" id="provider-title">Sign-in methods</h2><p className="panel-subtitle">How users access their accounts</p></div></div>{overview ? <div className="provider-content"><div className="provider-total"><strong>{metrics?.totalUsers ?? 0}</strong><span>registered accounts</span></div><div className="provider-list">{['google', 'microsoft', 'linkedin', 'password'].map((name) => { const count = overview.providers.find((entry) => entry.provider === name)?.count ?? 0; const percent = metrics?.totalUsers ? Math.round(count / metrics.totalUsers * 100) : 0; return <div className="provider-row" key={name}><span className="provider-name">{prettyName(name)}</span><div className="provider-track" aria-label={`${percent}% ${name}`}><div className="provider-fill" style={{ width: `${percent}%` }} /></div><span className="provider-count">{count}</span></div>; })}</div></div> : <div className="provider-content"><div className="skeleton" style={{ height: 155 }} /></div>}</section>
-    </div>
-    <section className="panel table-panel"><div className="table-toolbar"><div className="toolbar-left"><div><h2 className="panel-title">Recently joined</h2><p className="panel-subtitle">The latest accounts added to your workspace</p></div></div><button className="secondary-button" onClick={onViewUsers}>View all users <FontAwesomeIcon icon={faArrowRightFromBracket} rotation={180} /></button></div>{busy && !overview ? <div className="loading-card">Loading workspace activity…</div> : <UserTable rows={overview?.recentUsers ?? []} onOpenUser={onOpenUser} />}</section>
-    <div className="bottom-grid"><RecentActivity items={overview?.recentActivity ?? []} /><section className="panel"><div className="panel-head"><div><h2 className="panel-title">Account health</h2><p className="panel-subtitle">Access and security snapshot</p></div></div><div className="activity-list"><HealthLine icon={faCircleCheck} title="Secure admin session" detail="Protected with a short-lived, HTTP-only cookie" tone="login" /><HealthLine icon={faGlobe} title="User access controls" detail="Account status is checked at sign-in" tone="login" /><HealthLine icon={faShieldHalved} title="Admin audit trail" detail="Account changes are recorded for review" tone="login" /></div></section></div>
-  </>;
-}
+    <SectionHeading eyebrow="OPERATIONS BRIEFING · TODAY" title="Your user base, in focus." description="A clear view of account growth, access, and recent sign-in activity." action={<span className="update-label"><FontAwesomeIcon icon={faClock} /> Updated just now</span>} />
+    <section className="metric-ribbon" aria-label="User account metrics">
+      <Metric label="Total accounts" value={metrics ? formatNumber(metrics.totalUsers) : '—'} detail="Across all sign-in methods" icon={faUsers} tone="blue" />
+      <Metric label="Access enabled" value={metrics ? formatNumber(metrics.activeUsers) : '—'} detail={metrics ? `${activeRate}% of all accounts` : 'Current account state'} icon={faUserCheck} tone="green" />
+      <Metric label="Joined today" value={metrics ? formatNumber(metrics.newToday) : '—'} detail="New accounts since midnight" icon={faUserPlus} tone="orange" />
+      <Metric label="Joined in 30 days" value={metrics ? formatNumber(metrics.signupsLast30Days) : '—'} detail="Rolling signup period" icon={faArrowDown} tone="violet" />
+    </section>
 
-function Metric({ label, value, foot, icon, tone }: { label: string; value?: number; foot: string; icon: typeof faUsers; tone: string }) {
-  return <section className="metric-card"><div className="metric-top"><span className="metric-label">{label}</span><span className={`metric-icon ${tone}`}><FontAwesomeIcon icon={icon} /></span></div><div className="metric-value">{value === undefined ? <span className="skeleton" style={{ display: 'inline-block', width: 62, height: 27 }} /> : value.toLocaleString('en')}</div><div className="metric-foot"><span>{foot}</span></div></section>;
-}
-
-function SignupChart({ data }: { data: Overview['signupsByDay'] }) {
-  const max = Math.max(4, ...data.map((item) => item.count));
-  const points = data.map((item, index) => ({ x: 42 + index * (670 / Math.max(1, data.length - 1)), y: 165 - (item.count / max) * 132 }));
-  const line = points.map((point, index) => `${index ? 'L' : 'M'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ');
-  const area = `${line} L ${points.at(-1)?.x ?? 712} 172 L 42 172 Z`;
-  const labelAt = [0, Math.floor((data.length - 1) / 2), data.length - 1].filter((value, index, all) => all.indexOf(value) === index);
-  return <div className="chart-wrap"><svg className="chart-svg" viewBox="0 0 740 205" role="img" aria-label="Daily account signups for the last 30 days">
-    <defs><linearGradient id="chartFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#16877e" stopOpacity=".18" /><stop offset="100%" stopColor="#16877e" stopOpacity=".015" /></linearGradient></defs>
-    {[34, 78, 122, 166].map((y) => <line key={y} className="chart-gridline" x1="38" x2="717" y1={y} y2={y} />)}
-    <text className="chart-label" x="7" y="37">{max}</text><text className="chart-label" x="7" y="81">{Math.round(max * .67)}</text><text className="chart-label" x="7" y="125">{Math.round(max * .33)}</text><text className="chart-label" x="14" y="169">0</text>
-    <path className="chart-area" d={area} /><path className="chart-line" d={line} />
-    {points.length > 0 && <circle className="chart-dot" cx={points.at(-1)!.x} cy={points.at(-1)!.y} r="4" />}
-    {labelAt.map((index) => <text key={index} className="chart-label" textAnchor={index === 0 ? 'start' : index === data.length - 1 ? 'end' : 'middle'} x={points[index]?.x ?? 42} y="193">{data[index]?.date ? new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric' }).format(new Date(`${data[index].date}T00:00:00`)) : ''}</text>)}
-  </svg></div>;
-}
-
-function UsersView({ data, busy, error, search, setSearch, status, setStatus, provider, setProvider, limit, setLimit, page, setPage, onOpenUser, onToggleStatus }: { data: PageData | null; busy: boolean; error: string; search: string; setSearch: (value: string) => void; status: string; setStatus: (value: string) => void; provider: string; setProvider: (value: string) => void; limit: number; setLimit: (value: number) => void; page: number; setPage: (value: number) => void; onOpenUser: (id: string) => void; onToggleStatus: (user: UserRow) => void }) {
-  return <><div className="heading-row"><div><div className="eyebrow">People and access</div><h1 className="page-title">Users</h1><p className="page-description">Search accounts, review sign-in activity, and manage access.</p></div><div className="date-chip"><FontAwesomeIcon icon={faUsers} /> {data?.pagination.total.toLocaleString('en') ?? '—'} accounts</div></div>
-    <section className="panel table-panel" aria-label="User accounts"><div className="table-toolbar"><div className="toolbar-left"><div className="table-tabs" role="radiogroup" aria-label="Filter users by account status"><button className={`table-tab ${status === 'all' ? 'selected' : ''}`} role="radio" aria-checked={status === 'all'} onClick={() => setStatus('all')}>All <span className="count">{data?.pagination.total ?? '—'}</span></button><button className={`table-tab ${status === 'active' ? 'selected' : ''}`} role="radio" aria-checked={status === 'active'} onClick={() => setStatus('active')}>Active</button><button className={`table-tab ${status === 'inactive' ? 'selected' : ''}`} role="radio" aria-checked={status === 'inactive'} onClick={() => setStatus('inactive')}>Inactive</button></div><label className="search-box"><FontAwesomeIcon icon={faMagnifyingGlass} /><input aria-label="Search users" placeholder="Search name or email…" value={search} onChange={(event) => setSearch(event.target.value)} /></label><select className="filter-select" aria-label="Filter by sign-in method" value={provider} onChange={(event) => setProvider(event.target.value)}><option value="all">All methods</option><option value="google">Google</option><option value="microsoft">Microsoft</option><option value="linkedin">LinkedIn</option><option value="password">Password</option></select></div></div>
-      {busy && !data ? <div className="loading-card">Loading users…</div> : <UserTable rows={data?.items ?? []} onOpenUser={onOpenUser} onToggleStatus={onToggleStatus} showJoined={true} loadFailed={Boolean(error)} />}
-      {data && <Pagination page={page} pages={data.pagination.pages} total={data.pagination.total} limit={limit} onPage={setPage} setLimit={setLimit} />}
+    <section className="brief-grid">
+      <article className="brief-card growth-card"><div className="card-heading"><div><p className="kicker">ACCOUNT GROWTH</p><h2>Signups over time</h2></div><span className="period-chip">Last 30 days</span></div><SignupChart values={data?.signupsByDay ?? []} busy={busy && !data} /></article>
+      <article className="brief-card provider-card"><div className="card-heading"><div><p className="kicker">IDENTITY MIX</p><h2>Sign-in methods</h2></div><FontAwesomeIcon className="card-corner-icon" icon={faFingerprint} /></div><ProviderBreakdown values={data?.providers ?? []} busy={busy && !data} /></article>
+      <article className="brief-card recent-accounts"><div className="card-heading"><div><p className="kicker">NEW TO THE WORKSPACE</p><h2>Recently joined</h2></div><button className="text-action" onClick={onViewUsers}>View directory <FontAwesomeIcon icon={faArrowRight} /></button></div><div className="recent-list">{data?.recentUsers.map((user) => <button className="recent-row" key={user._id} onClick={() => onOpenUser(user._id)}><PersonIdentity user={user} /><span className="recent-date">{dateLabel(user.createdAt, { month: 'short', day: 'numeric' })}<FontAwesomeIcon icon={faArrowUpRightFromSquare} /></span></button>)}{!data?.recentUsers.length && <EmptyState loading={busy} title="No new accounts yet" detail="New signups will appear here." />}</div></article>
+      <article className="brief-card activity-card"><div className="card-heading"><div><p className="kicker">LIVE SIGNALS</p><h2>Recent sign-ins</h2></div><span className="signal-mark"><i /> User activity</span></div><div className="activity-list">{data?.recentActivity.map((activity, index) => <div className="activity-row" key={activity._id || `${activity.createdAt}-${index}`}><span className="activity-icon"><FontAwesomeIcon icon={faFingerprint} /></span><div className="activity-description"><strong>{activity.user?.name || activity.user?.email || 'Unidentified account'}</strong><span>{titleCase(activity.activity)} · {titleCase(activity.provider)}</span></div><time>{relativeTime(activity.createdAt)}</time></div>)}{!data?.recentActivity.length && <EmptyState loading={busy} title="No sign-ins to show" detail="Recorded sign-in events will appear here." />}</div></article>
     </section>
   </>;
 }
 
-function UserTable({ rows, onOpenUser, onToggleStatus, showJoined = false, loadFailed = false }: { rows: UserRow[]; onOpenUser: (id: string) => void; onToggleStatus?: (user: UserRow) => void; showJoined?: boolean; loadFailed?: boolean }) {
-  return <div className="table-wrap"><table className="users-table"><thead><tr><th scope="col">User</th><th scope="col">Sign-in method</th><th scope="col">Status</th>{showJoined && <th scope="col">Joined</th>}<th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>{rows.map((user) => <tr key={user._id}>
-    <td><button className="user-cell" style={{ border: 0, background: 'none', padding: 0, textAlign: 'left' }} onClick={() => onOpenUser(user._id)}><span className="user-avatar">{initials(user.name, user.email)}</span><span><span className="user-name">{user.name || 'Unnamed user'}</span><span className="user-email">{user.email || 'No email on file'}</span></span></button></td>
-    <td><span className="provider-pill"><FontAwesomeIcon icon={user.provider === 'password' ? faLock : faGlobe} /> {prettyName(user.provider)}</span></td>
-    <td><span className={`status ${user.isActive === false ? 'inactive' : 'active'}`}><span className="status-dot" />{user.isActive === false ? 'Inactive' : 'Active'}</span></td>
-    {showJoined && <td>{dateLabel(user.createdAt)}</td>}
-    <td>{onToggleStatus ? <button className="row-menu" aria-label={`${user.isActive === false ? 'Open details and restore access for' : 'Open details and manage access for'} ${user.name || user.email || 'user'}`} onClick={() => onOpenUser(user._id)}><FontAwesomeIcon icon={faEllipsis} /></button> : <button className="row-menu" aria-label={`Open ${user.name || user.email || 'user'} details`} onClick={() => onOpenUser(user._id)}><FontAwesomeIcon icon={faEllipsis} /></button>}</td>
-  </tr>)}{rows.length === 0 && <tr><td colSpan={showJoined ? 5 : 4} className="table-empty">{loadFailed ? 'The account list could not be loaded. Please try again.' : 'No matching accounts. Try adjusting your search or filters.'}</td></tr>}</tbody></table></div>;
+function Metric({ label, value, detail, icon, tone }: { label: string; value: string; detail: string; icon: typeof faUsers; tone: string }) {
+  return <article className="metric-item"><div className="metric-top"><span className={`metric-icon ${tone}`}><FontAwesomeIcon icon={icon} /></span><span className="metric-period">CURRENT</span></div><p className="metric-value">{value}</p><p className="metric-label">{label}</p><p className="metric-detail">{detail}</p></article>;
 }
 
-function Pagination({ page, pages, total, limit, onPage, setLimit, noun = 'accounts' }: { page: number; pages: number; total: number; limit: number; onPage: (value: number) => void; setLimit?: (value: number) => void; noun?: string }) {
-  const start = total ? (page - 1) * limit + 1 : 0;
-  const end = Math.min(page * limit, total);
-  return <div className="table-footer"><span>Showing {start}–{end} of {total.toLocaleString('en')} {noun}</span><div className="footer-controls">{setLimit && <select className="filter-select" aria-label="Accounts per page" value={limit} onChange={(event) => setLimit(Number(event.target.value))}><option value={10}>10 per page</option><option value={25}>25 per page</option><option value={50}>50 per page</option></select>}<nav className="pagination" aria-label="Page navigation"><button className="page-btn" aria-label="Previous page" disabled={page <= 1} onClick={() => onPage(page - 1)}><FontAwesomeIcon icon={faChevronLeft} /></button><span className="page-btn current" aria-current="page">{pages ? page : 0}</span><button className="page-btn" aria-label="Next page" disabled={page >= pages} onClick={() => onPage(page + 1)}><FontAwesomeIcon icon={faChevronRight} /></button></nav></div></div>;
+function SignupChart({ values, busy }: { values: Overview['signupsByDay']; busy: boolean }) {
+  const max = Math.max(1, ...values.map((item) => item.count));
+  const total = values.reduce((sum, item) => sum + item.count, 0);
+  if (busy) return <div className="chart-skeleton" aria-label="Loading signup trend" />;
+  if (!values.length) return <EmptyState title="Signup trend unavailable" detail="There is no daily signup data for this period." />;
+  const barWidth = 12;
+  const gap = 5;
+  const chartWidth = values.length * (barWidth + gap) - gap;
+  return <div className="chart-wrap"><div className="chart-total"><strong>{formatNumber(total)}</strong><span>accounts joined during this period</span></div><svg className="signup-chart" viewBox={`0 0 ${chartWidth} 112`} role="img" aria-label={`Daily signups over 30 days, ${total} total accounts`} preserveAspectRatio="none"><line x1="0" x2={chartWidth} y1="24" y2="24" /><line x1="0" x2={chartWidth} y1="57" y2="57" /><line x1="0" x2={chartWidth} y1="90" y2="90" />{values.map((item, index) => { const height = Math.max(3, (item.count / max) * 82); return <rect key={item.date} x={index * (barWidth + gap)} y={94 - height} width={barWidth} height={height} rx="3" className={index === values.length - 1 ? 'bar current' : 'bar'}><title>{`${dateLabel(item.date, { month: 'short', day: 'numeric' })}: ${item.count} signups`}</title></rect>; })}</svg><div className="chart-axis"><span>{dateLabel(values[0]?.date, { month: 'short', day: 'numeric' })}</span><span>{dateLabel(values[14]?.date, { month: 'short', day: 'numeric' })}</span><span>{dateLabel(values.at(-1)?.date, { month: 'short', day: 'numeric' })}</span></div></div>;
 }
 
-function RecentActivity({ items }: { items: ActivityRow[] }) {
-  return <section className="panel"><div className="panel-head"><div><h2 className="panel-title">Recent sign-ins</h2><p className="panel-subtitle">The latest account activity</p></div><span className="date-chip"><FontAwesomeIcon icon={faClock} /> Live</span></div><div className="activity-list">{items.length ? items.slice(0, 5).map((item, index) => <div className="activity-item" key={item._id || `${item.activity}-${index}`}><div className={`activity-mark ${item.activity === 'login' ? 'login' : ''}`}><FontAwesomeIcon icon={item.activity === 'signup' ? faUserPlus : faCircleUser} /></div><div className="activity-copy"><strong>{item.user?.name || item.user?.email || 'A user'}</strong> {item.activity === 'signup' ? 'created an account' : item.activity === 'logout' ? 'signed out' : 'signed in'}<div style={{ color: '#95a0aa', marginTop: 2 }}>via {prettyName(item.provider)}</div></div><span className="activity-time">{relativeTime(item.createdAt)}</span></div>) : <div className="audit-empty">No recent sign-ins to show yet.</div>}</div></section>;
+function ProviderBreakdown({ values, busy }: { values: Overview['providers']; busy: boolean }) {
+  if (busy) return <div className="provider-skeleton" aria-label="Loading sign-in method data" />;
+  const total = values.reduce((sum, item) => sum + item.count, 0);
+  const palette = ['#3157d5', '#eb7045', '#7b68bf', '#43a58d', '#d9a830'];
+  const circumference = 2 * Math.PI * 43;
+  let offset = 0;
+  return <div className="provider-breakdown">{values.length > 0 && <div className="provider-chart"><svg viewBox="0 0 110 110" role="img" aria-label={`Sign-in methods for ${formatNumber(total)} accounts`}><circle className="donut-track" cx="55" cy="55" r="43" />{values.map((item, index) => { const portion = total ? item.count / total : 0; const segment = <circle key={item.provider || 'unknown'} cx="55" cy="55" r="43" className="donut-segment" stroke={palette[index % palette.length]} strokeDasharray={`${portion * circumference} ${circumference}`} strokeDashoffset={-offset} />; offset += portion * circumference; return segment; })}</svg><div className="provider-center"><strong>{formatNumber(total)}</strong><span>accounts</span></div></div>}<div className="provider-list">{values.map((item, index) => { const pct = total ? Math.round(item.count / total * 100) : 0; return <div className="provider-item" key={item.provider || 'unknown'}><div className="provider-label"><i style={{ backgroundColor: palette[index % palette.length] }} /><span>{titleCase(item.provider || 'Unknown')}</span><strong>{formatNumber(item.count)} · {pct}%</strong></div><div className="provider-track"><span style={{ width: `${pct}%`, backgroundColor: palette[index % palette.length] }} /></div></div>; })}{!values.length && <EmptyState title="No method data" detail="Sign-in methods will appear here." />}</div></div>;
 }
 
-function HealthLine({ icon, title, detail, tone }: { icon: typeof faCheck; title: string; detail: string; tone: string }) {
-  return <div className="activity-item"><div className={`activity-mark ${tone}`}><FontAwesomeIcon icon={icon} /></div><div className="activity-copy"><strong>{title}</strong><div style={{ color: '#89949f', marginTop: 2 }}>{detail}</div></div><FontAwesomeIcon icon={faCheck} style={{ color: '#399671', fontSize: 11 }} /></div>;
-}
-
-function AuditView({ data, busy, error, action, setAction, search, setSearch, page, setPage, onOpenUser }: { data: AuditPage | null; busy: boolean; error: string; action: string; setAction: (value: string) => void; search: string; setSearch: (value: string) => void; page: number; setPage: (value: number) => void; onOpenUser: (id: string) => void }) {
-  return <><div className="heading-row"><div><div className="eyebrow">Security and accountability</div><h1 className="page-title">Admin activity</h1><p className="page-description">A reviewable record of account access changes made in this console.</p></div><div className="date-chip"><FontAwesomeIcon icon={faShieldHalved} /> Audit history</div></div>
-    <section className="panel table-panel" aria-label="Admin audit history"><div className="table-toolbar"><div className="toolbar-left"><div><h2 className="panel-title">Account changes</h2><p className="panel-subtitle">Activation and deactivation actions</p></div><label className="search-box"><FontAwesomeIcon icon={faMagnifyingGlass} /><input aria-label="Search audit by administrator or account" placeholder="Search admin or account…" value={search} onChange={(event) => setSearch(event.target.value)} /></label><select className="filter-select" aria-label="Filter audit by action" value={action} onChange={(event) => setAction(event.target.value)}><option value="all">All actions</option><option value="user.activated">Access restored</option><option value="user.deactivated">Access disabled</option></select></div></div><div className="table-wrap"><table className="users-table"><thead><tr><th scope="col">Action</th><th scope="col">Administrator</th><th scope="col">Account</th><th scope="col">Date</th><th scope="col"><span className="sr-only">Actions</span></th></tr></thead><tbody>{data?.items.map((item, index) => <tr key={`${item.createdAt}-${index}`}>
-      <td><span className={`status ${item.action.endsWith('deactivated') ? 'inactive' : 'active'}`}><span className="status-dot" />{item.action.endsWith('deactivated') ? 'Access disabled' : 'Access restored'}</span></td>
-      <td>{item.actor}</td>
-      <td>{item.targetExists ? <button className="user-cell" style={{ border: 0, background: 'none', padding: 0, textAlign: 'left' }} onClick={() => onOpenUser(item.targetUserId)}><span><span className="user-name">{item.targetName || 'Unnamed user'}</span><span className="user-email">{item.targetEmail || 'No email on file'} · now {item.targetActive ? 'active' : 'disabled'}</span></span></button> : <span><span className="user-name">Deleted account</span><span className="user-email">{item.targetUserId}</span></span>}</td>
-      <td>{dateLabel(item.createdAt)} · {new Intl.DateTimeFormat('en', { hour: 'numeric', minute: '2-digit' }).format(new Date(item.createdAt))}</td>
-      <td>{item.targetExists ? <button className="row-menu" aria-label={`Open ${item.targetName || item.targetEmail || 'account'} details`} onClick={() => onOpenUser(item.targetUserId)}><FontAwesomeIcon icon={faEllipsis} /></button> : <span className="user-email">—</span>}</td>
-    </tr>)}{!data?.items.length && <tr><td colSpan={5} className="table-empty">{busy && !data ? 'Loading audit history…' : error ? 'The audit history could not be loaded. Please try again.' : 'No account access changes match these filters.'}</td></tr>}</tbody></table></div>{data && <Pagination page={page} pages={data.pagination.pages} total={data.pagination.total} limit={data.pagination.limit} onPage={setPage} noun="audit entries" />}</section>
+function UsersView({ data, busy, error, search, setSearch, status, setStatus, provider, setProvider, page, setPage, pageSize, setPageSize, onOpenUser }: {
+  data: PageResult<UserRow> | null; busy: boolean; error: string; search: string; setSearch: (value: string) => void; status: string; setStatus: (value: string) => void;
+  provider: string; setProvider: (value: string) => void; page: number; setPage: (value: number) => void; pageSize: number; setPageSize: (value: number) => void; onOpenUser: (id: string) => void;
+}) {
+  const items = data?.items ?? [];
+  return <>
+    <SectionHeading eyebrow="ACCOUNT DIRECTORY" title="People and access." description="Find a user, understand their sign-in context, and make an informed access decision." action={<span className="directory-total"><strong>{data ? formatNumber(data.pagination.total) : '—'}</strong> accounts</span>} />
+    <section className="directory-shell" aria-label="Account directory">
+      <div className="directory-tools"><label className="directory-search"><FontAwesomeIcon icon={faMagnifyingGlass} /><input aria-label="Search accounts" placeholder="Search by name or email" value={search} onChange={(event) => setSearch(event.target.value)} /></label><div className="filter-tools"><span className="filter-label"><FontAwesomeIcon icon={faSliders} /> Refine</span><select aria-label="Filter account status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">All access states</option><option value="active">Access enabled</option><option value="inactive">Access disabled</option></select><select aria-label="Filter sign-in provider" value={provider} onChange={(event) => setProvider(event.target.value)}><option value="all">All sign-in methods</option><option value="google">Google</option><option value="microsoft">Microsoft</option><option value="linkedin">LinkedIn</option><option value="password">Password</option></select><button className="filter-reset" onClick={() => { setSearch(''); setStatus('all'); setProvider('all'); }} aria-label="Clear account filters"><FontAwesomeIcon icon={faFilter} /> Clear</button></div></div>
+      {error && !data && <div className="directory-message" role="status">The account list could not be loaded. Try refreshing the page.</div>}
+      <div className="table-container"><table className="account-table"><thead><tr><th scope="col">ACCOUNT</th><th scope="col">SIGN-IN</th><th scope="col">VERIFICATION</th><th scope="col">ACCESS</th><th scope="col">JOINED</th><th scope="col"><span className="sr-only">Open account</span></th></tr></thead><tbody>{busy && !data ? Array.from({ length: 5 }, (_, index) => <tr key={index} className="loading-row"><td colSpan={6}><span /><span /></td></tr>) : items.map((user) => <tr key={user._id} className="account-row"><td><PersonIdentity user={user} /></td><td><ProviderTag provider={user.provider} /></td><td><span className={`verification ${user.emailVerified ? 'verified' : 'pending'}`}><i />{user.emailVerified ? 'Verified' : 'Unverified'}</span></td><td><AccessTag active={user.isActive !== false} /></td><td className="joined-date">{dateLabel(user.createdAt, { month: 'short', day: 'numeric', year: 'numeric' })}</td><td><button className="row-open" aria-label={`Open ${user.name || user.email || 'account'} details`} onClick={() => onOpenUser(user._id)}><FontAwesomeIcon icon={faArrowRight} /></button></td></tr>)}</tbody></table></div>
+      <div className="mobile-account-list">{busy && !data ? Array.from({ length: 4 }, (_, index) => <div className="mobile-account-card mobile-loading" key={index}><span /><span /></div>) : items.map((user) => <button className="mobile-account-card" key={user._id} onClick={() => onOpenUser(user._id)}><PersonIdentity user={user} /><span className="mobile-account-meta"><span className="mobile-account-tags"><ProviderTag provider={user.provider} /><span className={`verification ${user.emailVerified ? 'verified' : 'pending'}`}><i />{user.emailVerified ? 'Verified' : 'Unverified'}</span><AccessTag active={user.isActive !== false} /></span><span className="mobile-account-date">Joined {dateLabel(user.createdAt, { month: 'short', day: 'numeric' })}</span></span></button>)}</div>
+      {!busy && items.length === 0 && <EmptyState title="No accounts found" detail={search || status !== 'all' || provider !== 'all' ? 'Try changing your search or filters.' : 'New accounts will appear here.'} />}
+      <div className="directory-footer"><label>Rows per page <select aria-label="Rows per page" value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option></select></label><span className="range-label">{data?.pagination.total ? `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, data.pagination.total)} of ${formatNumber(data.pagination.total)}` : '0 accounts'}</span><div className="pager"><button aria-label="Previous page" disabled={page <= 1 || busy} onClick={() => setPage(page - 1)}><FontAwesomeIcon icon={faChevronLeft} /></button><span>{data?.pagination.pages ? `${page} / ${data.pagination.pages}` : '0 / 0'}</span><button aria-label="Next page" disabled={page >= (data?.pagination.pages ?? 0) || busy} onClick={() => setPage(page + 1)}><FontAwesomeIcon icon={faChevronRight} /></button></div></div>
+    </section>
   </>;
 }
 
-function UserDrawer({ detail, loading, onClose, onToggleStatus }: { detail: Detail | null; loading: boolean; onClose: () => void; onToggleStatus: (user: UserRow) => void }) {
+function AuditView({ data, busy, error, action, setAction, search, setSearch, page, setPage, onOpenUser }: {
+  data: AuditResult | null; busy: boolean; error: string; action: string; setAction: (value: string) => void; search: string; setSearch: (value: string) => void; page: number; setPage: (value: number) => void; onOpenUser: (id: string) => void;
+}) {
+  const items = data?.items ?? [];
+  return <>
+    <SectionHeading eyebrow="ACCOUNTABILITY" title="A record of access." description="Review account changes made by administrators, with the affected account and event time." action={<span className="audit-status"><FontAwesomeIcon icon={faShieldHalved} /> Append-only activity</span>} />
+    <section className="ledger-shell" aria-label="Admin activity ledger"><div className="ledger-tools"><label className="ledger-search"><FontAwesomeIcon icon={faMagnifyingGlass} /><input aria-label="Search activity" placeholder="Search administrator or account" value={search} onChange={(event) => setSearch(event.target.value)} /></label><select aria-label="Filter by event" value={action} onChange={(event) => setAction(event.target.value)}><option value="all">All events</option><option value="user.activated">Access restored</option><option value="user.deactivated">Access disabled</option></select><span className="ledger-count">{data ? `${formatNumber(data.pagination.total)} recorded events` : 'Recorded events'}</span></div>
+      <div className="ledger-head"><span>EVENT</span><span>ACTOR</span><span>AFFECTED ACCOUNT</span><span>WHEN</span><span>ORIGIN</span></div>
+      <div className="ledger-list">{busy && !data ? <div className="ledger-loading">Loading the activity ledger…</div> : items.map((item, index) => <div className="ledger-row" key={`${item.createdAt}-${item.targetUserId}-${index}`}><div className="ledger-event"><span className={`event-glyph ${item.action.endsWith('deactivated') ? 'disabled' : ''}`}><FontAwesomeIcon icon={item.action.endsWith('deactivated') ? faArrowDown : faCheck} /></span><span>{item.action.endsWith('deactivated') ? 'Access disabled' : 'Access restored'}</span></div><span className="ledger-actor">{item.actor}</span>{item.targetExists ? <button className="ledger-person" onClick={() => onOpenUser(item.targetUserId)}><strong>{item.targetName || 'Unnamed account'}</strong><span>{item.targetEmail || item.targetUserId}</span></button> : <div className="ledger-person deleted"><strong>Deleted account</strong><span>{item.targetUserId}</span></div>}<time className="ledger-time" dateTime={item.createdAt}>{dateLabel(item.createdAt, { month: 'short', day: 'numeric', year: 'numeric' })}<span>{dateLabel(item.createdAt, { hour: 'numeric', minute: '2-digit' })}</span></time><span className="ledger-origin">{item.ipAddress || 'Not recorded'}</span></div>)}{!busy && !items.length && <EmptyState title={error ? 'Activity could not be loaded' : 'Nothing recorded yet'} detail={error ? 'Try refreshing the page.' : 'Account access changes will appear here.'} />}</div>
+      <div className="directory-footer"><span className="range-label">{data?.pagination.total ? `Page ${page} of ${data.pagination.pages}` : 'No events'}</span><div className="pager"><button aria-label="Previous page" disabled={page <= 1 || busy} onClick={() => setPage(page - 1)}><FontAwesomeIcon icon={faChevronLeft} /></button><span>{data?.pagination.pages ? `${page} / ${data.pagination.pages}` : '0 / 0'}</span><button aria-label="Next page" disabled={page >= (data?.pagination.pages ?? 0) || busy} onClick={() => setPage(page + 1)}><FontAwesomeIcon icon={faChevronRight} /></button></div></div>
+    </section>
+  </>;
+}
+
+function AccountDrawer({ detail, loading, onClose, onToggle }: { detail: UserDetail | null; loading: boolean; onClose: () => void; onToggle: (user: UserRow) => void }) {
   const drawerRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     closeRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { onClose(); return; }
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
       if (event.key !== 'Tab') return;
-      const focusable = drawerRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input, select, [tabindex]:not([tabindex="-1"])');
+      const focusable = drawerRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input,select,[tabindex]:not([tabindex="-1"])');
       if (!focusable?.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      if (event.shiftKey && document.activeElement === focusable[0]) { event.preventDefault(); focusable[focusable.length - 1].focus(); }
+      else if (!event.shiftKey && document.activeElement === focusable[focusable.length - 1]) { event.preventDefault(); focusable[0].focus(); }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => { window.removeEventListener('keydown', onKeyDown); opener?.focus(); };
+    window.addEventListener('keydown', keydown);
+    return () => { window.removeEventListener('keydown', keydown); opener?.focus(); };
   }, [onClose]);
-
-  return <div className="drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><aside ref={drawerRef} className="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><div className="drawer-head"><h2 className="drawer-heading" id="drawer-title">User details</h2><button ref={closeRef} className="icon-button" onClick={onClose} aria-label="Close user details"><FontAwesomeIcon icon={faXmark} /></button></div>{loading || !detail ? <div className="drawer-body"><div className="skeleton" style={{ height: 56 }} /><div className="skeleton" style={{ height: 85, marginTop: 17 }} /><div className="skeleton" style={{ height: 180, marginTop: 18 }} /></div> : <div className="drawer-body"><div className="detail-profile"><div className="avatar large">{initials(detail.user.name, detail.user.email)}</div><div><div className="detail-name">{detail.user.name || 'Unnamed user'}</div><div className="detail-email">{detail.user.email || 'No email on file'}</div></div></div><div className="detail-grid"><DetailField label="Account status" value={detail.user.isActive === false ? 'Inactive' : 'Active'} /><DetailField label="Sign-in method" value={prettyName(detail.user.provider)} /><DetailField label="Email verified" value={detail.user.emailVerified ? 'Yes' : 'Not confirmed'} /><DetailField label="Joined" value={dateLabel(detail.user.createdAt)} /><DetailField label="Last profile update" value={dateLabel(detail.user.updatedAt)} /><DetailField label="Locale" value={detail.user.locale || 'Not provided'} /></div><h3 className="drawer-subhead">Recent activity</h3>{detail.activities.length ? detail.activities.slice(0, 15).map((activity, index) => <div className="detail-activity" key={activity._id || `${activity.activity}-${index}`}><FontAwesomeIcon icon={activity.activity === 'signup' ? faUserPlus : faCircleUser} style={{ color: '#2f8379' }} /><span>{prettyName(activity.activity)} · {prettyName(activity.provider)}</span><span className="activity-time">{relativeTime(activity.createdAt)}</span></div>) : <div className="audit-empty" style={{ margin: '0' }}>No sign-in activity recorded.</div>}<div className="detail-actions"><button className={detail.user.isActive === false ? 'primary-button' : 'danger-button'} aria-label={`${detail.user.isActive === false ? 'Restore access for' : 'Disable access for'} ${detail.user.name || detail.user.email || 'this account'}`} onClick={() => onToggleStatus(detail.user)}>{detail.user.isActive === false ? <><FontAwesomeIcon icon={faCircleCheck} /> Restore access</> : <><FontAwesomeIcon icon={faArrowDown} /> Disable access</>}</button></div></div>}</aside></div>;
+  const user = detail?.user;
+  return <div className="drawer-scrim" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><aside className="account-drawer" ref={drawerRef} role="dialog" aria-modal="true" aria-labelledby="account-drawer-title"><div className="drawer-top"><span className="kicker">ACCOUNT RECORD</span><button ref={closeRef} className="drawer-close" onClick={onClose} aria-label="Close account details"><FontAwesomeIcon icon={faXmark} /></button></div>{loading || !user ? <div className="drawer-loading"><span /><span /><span /></div> : <><div className="drawer-identity"><span className="large-avatar">{shortName(user.name, user.email)}</span><div><h2 id="account-drawer-title">{user.name || 'Unnamed account'}</h2><p>{user.email || 'No email address on file'}</p></div></div><div className="drawer-tags"><AccessTag active={user.isActive !== false} /><ProviderTag provider={user.provider} /></div><div className="detail-facts"><div><span>EMAIL VERIFICATION</span><strong>{user.emailVerified ? 'Verified' : 'Not verified'}</strong></div><div><span>CREATED</span><strong>{dateLabel(user.createdAt)}</strong></div><div><span>LAST PROFILE UPDATE</span><strong>{dateLabel(user.updatedAt)}</strong></div><div><span>LOCALE</span><strong>{user.locale || 'Not provided'}</strong></div></div><section className="drawer-activity"><div className="drawer-section-heading"><div><p className="kicker">ACCOUNT HISTORY</p><h3>Recent sign-ins</h3></div><span>{detail.activities.length} events</span></div>{detail.activities.length ? detail.activities.slice(0, 15).map((activity, index) => <div className="drawer-event" key={activity._id || `${activity.createdAt}-${index}`}><span className="drawer-event-dot" /><div><strong>{titleCase(activity.activity)}</strong><p>{titleCase(activity.provider)}{activity.devicePlatform ? ` · ${activity.devicePlatform}` : ''}{activity.browser ? ` · ${activity.browser}` : ''}</p></div><time>{relativeTime(activity.createdAt)}</time></div>) : <p className="quiet-empty">No sign-in events are recorded for this account.</p>}</section><div className="drawer-actions"><div><p className="kicker">ACCESS CONTROL</p><p>{user.isActive === false ? 'This account is currently unable to sign in.' : 'This account can currently access the product.'}</p></div><button className={`button ${user.isActive === false ? 'primary' : 'danger'}`} onClick={() => onToggle(user)}><FontAwesomeIcon icon={user.isActive === false ? faCircleCheck : faArrowDown} />{user.isActive === false ? 'Restore access' : 'Disable access'}</button></div></>}</aside></div>;
 }
 
-function DetailField({ label, value }: { label: string; value: string }) {
-  return <div className="detail-field"><div className="detail-label">{label}</div><div className="detail-value">{value}</div></div>;
+function PersonIdentity({ user }: { user: UserRow }) {
+  return <span className="person-identity"><span className="person-avatar">{shortName(user.name, user.email)}</span><span className="person-copy"><strong>{user.name || 'Unnamed account'}</strong><span>{user.email || 'No email on file'}</span></span></span>;
+}
+
+function ProviderTag({ provider }: { provider?: string }) {
+  return <span className="provider-tag"><FontAwesomeIcon icon={provider === 'password' ? faFingerprint : faGlobe} />{titleCase(provider)}</span>;
+}
+
+function AccessTag({ active }: { active: boolean }) {
+  return <span className={`access-tag ${active ? 'enabled' : 'disabled'}`}><i />{active ? 'Enabled' : 'Disabled'}</span>;
+}
+
+function EmptyState({ title, detail, loading = false }: { title: string; detail: string; loading?: boolean }) {
+  return <div className={`empty-state ${loading ? 'loading' : ''}`} role="status"><span className="empty-mark"><FontAwesomeIcon icon={loading ? faEllipsis : faUsers} /></span><strong>{loading ? 'Loading records…' : title}</strong><p>{loading ? 'Please wait while the latest data arrives.' : detail}</p></div>;
 }
