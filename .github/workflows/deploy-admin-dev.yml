@@ -1,0 +1,128 @@
+name: Deploy RevOps admin development
+
+on:
+  push:
+    branches: [development]
+    paths:
+      - "admin/**"
+      - ".github/workflows/deploy-admin-dev.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-admin-development
+  cancel-in-progress: false
+
+jobs:
+  deploy-admin-api:
+    if: github.ref == 'refs/heads/development'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: admin/backend/api/package-lock.json
+
+      - name: Install API dependencies
+        working-directory: admin/backend/api
+        run: npm ci
+
+      - name: Build API
+        working-directory: admin/backend/api
+        run: npm run build
+
+      - name: Trim development dependencies
+        working-directory: admin/backend/api
+        run: npm prune --omit=dev
+
+      - name: Deploy admin API to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: revops-admin-api-dev
+          publish-profile: ${{ secrets.AZURE_ADMIN_API_PUBLISH_PROFILE }}
+          package: admin/backend/api
+          clean: true
+          restart: true
+
+      - name: Verify admin API health
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_url="https://revops-admin-api-dev.azurewebsites.net"
+          for attempt in $(seq 1 24); do
+            if curl --silent --show-error --fail "$base_url/api/health?check=$GITHUB_RUN_ID-$attempt" | grep -Fq '"status":"ok"'; then
+              exit 0
+            fi
+            if [[ "$attempt" == 24 ]]; then
+              echo "The admin API did not return its health response after deployment."
+              exit 1
+            fi
+            sleep 10
+          done
+
+  deploy-admin-app:
+    if: github.ref == 'refs/heads/development'
+    needs: deploy-admin-api
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: admin/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: admin/frontend
+        run: npm ci
+
+      - name: Build admin app
+        working-directory: admin/frontend
+        env:
+          NEXT_PUBLIC_ADMIN_API_BASE_URL: https://revops-admin-api-dev.azurewebsites.net/api
+          NEXT_PUBLIC_ADMIN_ENV_LABEL: Development
+        run: npm run build
+
+      - name: Trim build output for deployment
+        working-directory: admin/frontend
+        run: |
+          rm -rf .next/cache
+          npm prune --omit=dev
+
+      - name: Stamp deployed commit
+        run: printf '{"commit":"%s"}\n' "$GITHUB_SHA" > admin/frontend/public/deployment-version.json
+
+      - name: Deploy admin app to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: revops-admin-app-dev
+          publish-profile: ${{ secrets.AZURE_ADMIN_APP_PUBLISH_PROFILE }}
+          package: admin/frontend
+          clean: true
+          restart: true
+
+      - name: Verify admin app deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_url="https://revops-admin-app-dev.azurewebsites.net"
+          for attempt in $(seq 1 24); do
+            version="$(curl --silent --show-error --fail "$base_url/deployment-version.json?check=$GITHUB_RUN_ID-$attempt" || true)"
+            if [[ "$version" == *"$GITHUB_SHA"* ]]; then
+              page="$(curl --silent --show-error --fail "$base_url/?deploy-check=$GITHUB_RUN_ID")"
+              grep -Fq 'Welcome back' <<< "$page"
+              grep -Fq 'Administrator access' <<< "$page"
+              exit 0
+            fi
+            if [[ "$attempt" == 24 ]]; then
+              echo "The admin app did not serve the deployed commit after deployment."
+              exit 1
+            fi
+            sleep 10
+          done
