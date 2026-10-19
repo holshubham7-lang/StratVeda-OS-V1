@@ -167,6 +167,14 @@ a {
   background:#52c697;
   box-shadow:0 0 0 3px rgba(82,198,151,.15)
 }
+.pulse.idle {
+  background:#b9c4cd;
+  box-shadow:0 0 0 3px rgba(185,196,205,.14)
+}
+.pulse.down {
+  background:#b64e46;
+  box-shadow:0 0 0 3px rgba(182,78,70,.16)
+}
 .workspace-note {
   margin:7px 0 0 15px;
   color:#92a2b0;
@@ -733,6 +741,11 @@ a {
   display:flex;
   gap:5px
 }
+.footer-controls {
+  display:flex;
+  align-items:center;
+  gap:9px
+}
 .page-btn {
   height:28px;
   min-width:28px;
@@ -1269,6 +1282,18 @@ a {
   }
   .table-footer {
     padding:10px 12px
+  }
+  .table-footer > span {
+    flex:1 1 100%;
+    margin-bottom:8px
+  }
+  .footer-controls {
+    flex:1;
+    justify-content:flex-end;
+    flex-wrap:wrap
+  }
+  .footer-controls .filter-select {
+    flex:0 0 auto
   }
   .top-actions {
     gap:8px

@@ -86,6 +86,7 @@ jobs:
         working-directory: admin/frontend
         env:
           NEXT_PUBLIC_ADMIN_API_BASE_URL: https://revops-admin-api-dev.azurewebsites.net/api
+          NEXT_PUBLIC_ADMIN_ENV_LABEL: Development
         run: npm run build
 
       - name: Trim build output for deployment

@@ -41,9 +41,14 @@ export class AdminController {
   }
 
   @Get('audit')
-  audit(@Query('page') page = '1', @Query('limit') limit = '20') {
+  audit(
+    @Query('page') page = '1',
+    @Query('limit') limit = '10',
+    @Query('action') action?: string,
+    @Query('search') search?: string,
+  ) {
     const currentPage = Math.min(Math.max(Number(page) || 1, 1), 100000);
-    const pageSize = Math.min(Math.max(Number(limit) || 20, 1), 50);
-    return this.admin.auditEvents(currentPage, pageSize);
+    const pageSize = Math.min(Math.max(Number(limit) || 10, 1), 50);
+    return this.admin.auditEvents({ page: currentPage, limit: pageSize, action, search });
   }
 }

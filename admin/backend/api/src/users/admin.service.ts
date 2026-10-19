@@ -106,11 +106,41 @@ export class AdminService {
     return user;
   }
 
-  async auditEvents(page: number, limit: number) {
+  async auditEvents(options: { page: number; limit: number; action?: string; search?: string }) {
+    const { page, limit, action, search } = options;
+    const filter: FilterQuery<AdminAudit> = {};
+    if (['user.activated', 'user.deactivated'].includes(action ?? '')) filter.action = action;
+    if (search?.trim()) {
+      const safe = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 100);
+      const matchingUsers = await this.users.find({
+        $or: [{ email: { $regex: safe, $options: 'i' } }, { name: { $regex: safe, $options: 'i' } }],
+      }).select('_id').lean();
+      filter.$or = [
+        { actor: { $regex: safe, $options: 'i' } },
+        { targetUserId: { $in: matchingUsers.map((user) => user._id) } },
+      ];
+    }
+
     const [items, total] = await Promise.all([
-      this.audit.find().sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
-      this.audit.countDocuments(),
+      this.audit.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      this.audit.countDocuments(filter),
     ]);
-    return { items, pagination: { page, limit, total, pages: Math.ceil(total / limit) } };
+    const targetIds = [...new Set(items.map((item) => String(item.targetUserId)))];
+    const targets = await this.users.find({ _id: { $in: targetIds } })
+      .select('name email isActive').lean();
+    const targetMap = new Map(targets.map((user) => [String(user._id), user]));
+    return {
+      items: items.map((item) => {
+        const target = targetMap.get(String(item.targetUserId));
+        return {
+          ...item,
+          targetName: target?.name,
+          targetEmail: target?.email,
+          targetActive: target ? target.isActive !== false : null,
+          targetExists: Boolean(target),
+        };
+      }),
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    };
   }
 }
