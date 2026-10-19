@@ -43,7 +43,7 @@ jobs:
       - name: Deploy UAT API to Azure App Service
         uses: azure/webapps-deploy@v3
         with:
-          app-name: ${{ vars.AZURE_UAT_API_APP_NAME }}
+          app-name: revops-api-uat
           publish-profile: ${{ secrets.AZURE_UAT_API_PUBLISH_PROFILE }}
           package: app/backend/api
           clean: true
