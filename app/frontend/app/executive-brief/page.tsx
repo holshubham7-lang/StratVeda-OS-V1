@@ -73,7 +73,7 @@ export default function ExecutiveBriefPage() {
   const [sequenceStatus, setSequenceStatus] = useState<CompletionStatus>("running");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const openDecisionCenter = useCallback(() => router.replace("/decision-center"), [router]);
+  const openDecisionCenter = useCallback(() => router.replace("/chat"), [router]);
 
   useEffect(() => {
     let active = true;
@@ -210,7 +210,7 @@ export default function ExecutiveBriefPage() {
               <div className="executive-brief-answer-heading">
                 <span className="fingerprint-section-kicker">RECOMMENDED QUESTION GENERATOR</span>
                 <h3>Answer these four questions</h3>
-                <p>Your answers are saved as you type. Complete all four to open your Decision Center.</p>
+                <p>Your answers are saved as you type. Complete all four to open your workspace.</p>
               </div>
               <div className="executive-brief-question-options">
                 {recommendedQuestions.map((question, index) => (
@@ -226,7 +226,7 @@ export default function ExecutiveBriefPage() {
                 <p className="fingerprint-notice" role="status" aria-live="polite">{answerNotice}</p>
                 <span className="executive-brief-answer-count" aria-live="polite">{answeredCount} of {recommendedQuestions.length} answered</span>
               </div>
-              <div className="executive-brief-actions"><Link className="fingerprint-save-exit" href="/business-fingerprint">Edit Profile</Link><button className="fingerprint-continue" type="submit" disabled={isSubmitting}>{isPreparingDecisionCenter ? "Preparing your Decision Center…" : "Open Decision Center"} <span aria-hidden="true">→</span></button></div>
+              <div className="executive-brief-actions"><Link className="fingerprint-save-exit" href="/business-fingerprint">Edit Profile</Link><button className="fingerprint-continue" type="submit" disabled={isSubmitting}>{isPreparingDecisionCenter ? "Preparing your Decision Center…" : "Open your workspace"} <span aria-hidden="true">→</span></button></div>
             </form>
           </section>
         </div>

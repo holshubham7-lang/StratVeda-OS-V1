@@ -1,5 +1,10 @@
-import { redirect } from "next/navigation";
+import { DecisionCenterDashboard } from "../../components/decision-center-dashboard";
+import { SessionRequired } from "../../components/session-required";
 
 export default function ChatPage() {
-  redirect("/decision-center");
+  return (
+    <SessionRequired>
+      <DecisionCenterDashboard showChatPanel />
+    </SessionRequired>
+  );
 }

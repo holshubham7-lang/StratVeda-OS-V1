@@ -34,7 +34,7 @@ export default function CookiePolicyPage() {
           heading: "Cookies we set",
           body: (
             <>
-              <p><strong>ri_access_token</strong> — strictly necessary. It keeps you signed in to StratVeda OS. It is HTTP-only (a script on the page cannot read it), scoped to this site with <em>SameSite=Lax</em>, served over HTTPS only in production, and it expires when your session ends. Without it you would be signed out on every page.</p>
+              <p><strong>ri_access_token</strong> — strictly necessary. It keeps you signed in to StratVeda OS for at least 24 hours. It is HTTP-only (a script on the page cannot read it), scoped to this site with <em>SameSite=Lax</em>, and served over HTTPS only in production. Without it you would be signed out on every page.</p>
               <p><strong>g_csrf_token</strong> — strictly necessary, and set by Google rather than by us. It appears when you choose Sign in with Google and protects that handover from forgery. Google's own policies govern how long it lives.</p>
             </>
           ),

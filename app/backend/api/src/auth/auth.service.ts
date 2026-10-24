@@ -8,6 +8,7 @@ import { User, UserDocument } from '../users/user.schema';
 import { SocialIdentity, SocialTokenService } from './social-token.service';
 import { RevokedToken } from './revoked-token.schema';
 import { UserActivity, UserActivityType } from './user-activity.schema';
+import { jwtLifetimeSeconds } from './jwt-lifetime';
 
 function deriveKey(password: string, salt: string, length: number, options: { N: number; r: number; p: number; maxmem: number }): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -204,11 +205,7 @@ export class AuthService implements OnModuleInit {
   }
 
   private expirationInSeconds(): number {
-    const configured = this.config.get<string>('JWT_EXPIRES_IN', '15m');
-    const match = /^(\d+)(s|m|h|d)$/.exec(configured);
-    if (!match) return 900;
-    const multipliers = { s: 1, m: 60, h: 3600, d: 86400 } as const;
-    return Number(match[1]) * multipliers[match[2] as keyof typeof multipliers];
+    return jwtLifetimeSeconds(this.config.get<string>('JWT_EXPIRES_IN', '24h'));
   }
 
   private async createUser(identity: SocialIdentity, acceptedTerms?: boolean): Promise<UserDocument> {

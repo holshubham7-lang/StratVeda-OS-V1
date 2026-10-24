@@ -40,6 +40,7 @@ const phoneCountries = Object.entries(countryPhoneCodes)
   .sort((left, right) => left.name.localeCompare(right.name));
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001/api";
 const draftStorageKey = "stratveda-business-fingerprint-draft";
+const problemStatementStorageKey = "stratveda-problem-statement-draft";
 
 type PersonalProfile = { name: string; email: string };
 
@@ -131,11 +132,13 @@ function PhoneCountryPicker({ value, onChange }: { value: string; onChange: (id:
 }
 export function BusinessFingerprintForm() {
   const router = useRouter();
-  const [step, setStep] = useState<1 | 2>(1);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [profile, setProfile] = useState<PersonalProfile>({ name: "", email: "" });
   const [phoneCountry, setPhoneCountry] = useState("IN");
   const [mobileNumber, setMobileNumber] = useState("");
   const [role, setRole] = useState("");
+  const [problemStatement, setProblemStatement] = useState("");
+  const [problemStatementError, setProblemStatementError] = useState("");
   const [details, setDetails] = useState<BusinessDetails>(emptyDetails);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState("");
@@ -152,6 +155,7 @@ export function BusinessFingerprintForm() {
       })
       .catch(() => {});
     const draft = readDraft();
+    try { setProblemStatement(sessionStorage.getItem(problemStatementStorageKey) ?? ""); } catch { /* Private browsing can disable session storage. */ }
     if (draft) {
       setDetails(draft);
       setNotice("Restored your unsaved answers from this browser.");
@@ -236,8 +240,18 @@ export function BusinessFingerprintForm() {
   const handleContinue = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (step === 1) { setStep(2); setNotice(""); return; }
-    if (!await saveDetails()) return;
-    setFlashNotice({ kind: "success", title: "Company profile saved", message: "Your business details are on file. Next up: What matters most right now?" });
+    if (step === 2) {
+      if (!await saveDetails()) return;
+      setStep(3);
+      setNotice("");
+      return;
+    }
+    if (problemStatement.trim().length < 10) {
+      setProblemStatementError("Add a little more detail so the interview can focus on the right problem.");
+      return;
+    }
+    try { sessionStorage.setItem(problemStatementStorageKey, problemStatement.trim()); } catch { /* Continue if browser storage is unavailable. */ }
+    setFlashNotice({ kind: "success", title: "Problem statement saved", message: "Continue setting up your priorities. Your interview agent can use this statement when it is connected." });
     beginOnboardingTransition();
     router.push("/strategic-context");
   };
@@ -264,13 +278,13 @@ export function BusinessFingerprintForm() {
   return (
     <section className="fingerprint-shell" aria-labelledby="fingerprint-title">
       <div className="fingerprint-heading">
-        <p className="fingerprint-eyebrow">STEP {step} OF 2</p>
-        <h1 id="fingerprint-title">{step === 1 ? "Your personal details" : "Understand your business"}</h1>
-        <p className="fingerprint-intro">{step === 1 ? "Confirm your signup details and add a mobile number." : "Share a few details so we can build a useful picture of how your business works."}</p>
+        <p className="fingerprint-eyebrow">STEP {step} OF 3</p>
+        <h1 id="fingerprint-title">{step === 1 ? "Your personal details" : step === 2 ? "Company Details" : "Your problem statement"}</h1>
+        <p className="fingerprint-intro">{step === 1 ? "Confirm your signup details and add a mobile number." : step === 2 ? "Share a few details so we can build a useful picture of how your business works." : "Start with the decision or challenge you want to work through."}</p>
       </div>
 
-      <div className="fingerprint-progress" aria-label={`Step ${step} of 2`}>
-        <span className={step === 1 ? "is-current" : "is-complete"}/><span className={step === 2 ? "is-current" : ""}/>
+      <div className="fingerprint-progress fingerprint-progress-three" aria-label={`Step ${step} of 3`}>
+        <span className={step === 1 ? "is-current" : "is-complete"}/><span className={step === 2 ? "is-current" : step === 3 ? "is-complete" : ""}/><span className={step === 3 ? "is-current" : ""}/>
       </div>
 
       <form className="fingerprint-form" noValidate onSubmit={handleContinue}>
@@ -283,7 +297,7 @@ export function BusinessFingerprintForm() {
               <div className="fingerprint-field"><label htmlFor="mobileNumber">Mobile number <span className="fingerprint-optional">Optional</span></label><div className="fingerprint-phone-control"><PhoneCountryPicker value={phoneCountry} onChange={setPhoneCountry} /><input id="mobileNumber" type="tel" autoComplete="tel-national" value={mobileNumber} onChange={(event) => setMobileNumber(event.target.value)} placeholder="Mobile number" /></div></div>
             </div>
           </section>
-        </div> : <div className="fingerprint-fields">
+        </div> : step === 2 ? <div className="fingerprint-fields">
           <section className="fingerprint-form-section" aria-labelledby="company-details-heading">
             <div className="fingerprint-section-heading"><div><h3 id="company-details-heading">Company Details</h3><p>Tell us about your company and your role.</p></div></div>
             <div className="fingerprint-company-grid">
@@ -310,25 +324,39 @@ export function BusinessFingerprintForm() {
             </fieldset>
           </section>
 
-          <section className="fingerprint-form-section" aria-label="Company size and stage">
+          <section className="fingerprint-form-section" aria-label="Company details continued">
             <div className="fingerprint-snapshot-grid">
               <SelectField id="teamSize" label="Team size" value={details.teamSize} options={teamSizes} placeholder="Select team size" error={errors.teamSize} onChange={(value) => update("teamSize", value)} />
               <SelectField id="revenueRange" label="Annual revenue" value={details.revenueRange} options={revenueRanges} placeholder="Select revenue range" error={errors.revenueRange} onChange={(value) => update("revenueRange", value)} />
               <SelectField id="companyStage" label="Company stage" value={details.companyStage} options={companyStages} placeholder="Select company stage" error={errors.companyStage} onChange={(value) => update("companyStage", value)} />
+              <SelectField id="role" label="Role" value={role} options={roles} placeholder="Select your role" onChange={setRole} />
             </div>
           </section>
-
-          <div className="fingerprint-company-extra-grid">
-            <SelectField id="role" label="Role" value={role} options={roles} placeholder="Select your role" onChange={setRole} />
-          </div>
           <LocationFields details={details} errors={errors} update={update} />
+        </div> : <div className="fingerprint-fields fingerprint-problem-step">
+          <section className="fingerprint-form-section" aria-labelledby="problem-statement-heading">
+            <div className="fingerprint-problem-chat-card">
+              <div className="fingerprint-problem-agent-mark" aria-hidden="true">S</div>
+              <div><span className="fingerprint-section-kicker">STRATVEDA INTERVIEW</span><p>What decision or problem is taking up the most attention right now? Share what is happening, what you have tried, and what a useful outcome would look like.</p></div>
+            </div>
+            <div className="fingerprint-field">
+              <label htmlFor="problemStatement" id="problem-statement-heading">Describe the problem you want help with</label>
+              <textarea id="problemStatement" rows={7} maxLength={3000} value={problemStatement} aria-invalid={Boolean(problemStatementError)} aria-describedby={problemStatementError ? "problemStatement-error" : "problemStatement-hint"} onChange={(event) => { setProblemStatement(event.target.value); setProblemStatementError(""); try { sessionStorage.setItem(problemStatementStorageKey, event.target.value); } catch { /* Keep editing if browser storage is unavailable. */ } }} placeholder="For example: We’re growing quickly, but our sales forecasts keep missing the mark. I’d like to understand what is driving the gap and where to focus first." />
+              {problemStatementError ? <span className="fingerprint-error" id="problemStatement-error">{problemStatementError}</span> : <span className="fingerprint-hint" id="problemStatement-hint">Your statement stays in this browser tab until the interview agent is connected. {problemStatement.length}/3,000</span>}
+            </div>
+            <div className="fingerprint-interview-ready" aria-live="polite">
+              <span className="fingerprint-interview-ready-icon" aria-hidden="true">AI</span>
+              <div><strong>Tailored follow-up questions</strong><p>The interview agent will decide how many questions to ask based on your company details and problem statement. This space is ready for that conversation.</p></div>
+              <span className="fingerprint-interview-status">Agent connection pending</span>
+            </div>
+          </section>
         </div>}
 
         <div className="fingerprint-form-footer">
           <p className={notice.startsWith("Check") ? "fingerprint-notice is-error" : "fingerprint-notice"} role="status" aria-live="polite">{notice}</p>
           <div className="fingerprint-form-actions">
             {step === 2 && <button className="fingerprint-save-exit" type="button" onClick={() => void handleSaveAndExit()} disabled={isSaving}>{isSaving ? "Saving…" : "Save & Exit"}</button>}
-            {step === 2 && <button className="fingerprint-save-exit" type="button" onClick={() => { setStep(1); setNotice(""); }}>Back</button>}
+            {step > 1 && <button className="fingerprint-save-exit" type="button" onClick={() => { setStep(step === 3 ? 2 : 1); setNotice(""); }}>Back</button>}
             <button className="fingerprint-continue" type="submit" disabled={isSaving}>{step === 2 && isSaving ? "Saving…" : <>Continue <span aria-hidden="true">→</span></>}</button>
           </div>
         </div>

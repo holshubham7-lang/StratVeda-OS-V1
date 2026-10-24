@@ -5,6 +5,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
+import { jwtLifetimeSeconds } from './auth/jwt-lifetime';
 import { FoundryChatModule } from './foundry/foundry-chat.module';
 import { WorkspaceModule } from './workspace/workspace.module';
 
@@ -29,7 +30,7 @@ import { WorkspaceModule } from './workspace/workspace.module';
           secret,
           signOptions: {
             algorithm: 'HS256',
-            expiresIn: config.get<string>('JWT_EXPIRES_IN', '15m'),
+            expiresIn: jwtLifetimeSeconds(config.get<string>('JWT_EXPIRES_IN', '24h')),
             issuer: 'revenue-intelligence-api',
             audience: 'revenue-intelligence-app',
           },
