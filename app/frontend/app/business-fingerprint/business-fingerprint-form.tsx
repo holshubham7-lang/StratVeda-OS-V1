@@ -36,7 +36,6 @@ const phoneCountries = Object.entries(countryPhoneCodes)
     id,
     callingCode,
     name: countryNames.of(id) ?? id,
-    flag: Array.from(id).map((letter) => String.fromCodePoint(127397 + letter.charCodeAt(0))).join(""),
   }))
   .sort((left, right) => left.name.localeCompare(right.name));
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001/api";
@@ -84,7 +83,7 @@ function LocationFields({ details, errors, update }: {
 }) {
   return (
     <section className="fingerprint-form-section" aria-labelledby="location-heading">
-      <div className="fingerprint-section-heading"><span className="fingerprint-section-number">04</span><div><h3 id="location-heading">Where you’re based</h3><p>Choose your company’s primary location.</p></div></div>
+      <div className="fingerprint-section-heading"><div><h3 id="location-heading">Location</h3><p>Choose your company’s primary location.</p></div></div>
       <div className="fingerprint-location-grid">
         <div className="fingerprint-field">
           <label htmlFor="country">Country <span className="fingerprint-required">*</span></label>
@@ -102,6 +101,32 @@ function LocationFields({ details, errors, update }: {
         </div>
       </div>
     </section>
+  );
+}
+
+function PhoneCountryPicker({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+  const [search, setSearch] = useState("");
+  const selected = phoneCountries.find((country) => country.id === value) ?? phoneCountries[0];
+  const visibleCountries = phoneCountries.filter((country) => `${country.name} ${country.id} +${country.callingCode}`.toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <details className="fingerprint-phone-picker">
+      <summary aria-label={`Country ${selected.name}, +${selected.callingCode}`}>
+        <span className="fingerprint-flag" style={{ backgroundImage: `url(https://flagcdn.com/w40/${selected.id.toLowerCase()}.png)` }} aria-hidden="true" />
+        <span>+{selected.callingCode}</span><span className="fingerprint-phone-chevron" aria-hidden="true">⌄</span>
+      </summary>
+      <div className="fingerprint-phone-menu">
+        <input aria-label="Search countries" type="search" placeholder="Search country or code" value={search} onChange={(event) => setSearch(event.target.value)} />
+        <div className="fingerprint-phone-options" role="listbox" aria-label="Countries">
+          {visibleCountries.map((country) => (
+            <button className="fingerprint-phone-option" type="button" role="option" aria-selected={value === country.id} key={country.id} onClick={(event) => { onChange(country.id); setSearch(""); event.currentTarget.closest("details")?.removeAttribute("open"); }}>
+              <span className="fingerprint-flag" style={{ backgroundImage: `url(https://flagcdn.com/w40/${country.id.toLowerCase()}.png)` }} aria-hidden="true" />
+              <span className="fingerprint-phone-country-name">{country.name}</span><span>+{country.callingCode}</span><span className="fingerprint-phone-country-id">{country.id}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </details>
   );
 }
 export function BusinessFingerprintForm() {
@@ -255,12 +280,12 @@ export function BusinessFingerprintForm() {
             <div className="fingerprint-company-grid fingerprint-personal-grid">
               <div className="fingerprint-field"><label htmlFor="profileName">Full name</label><input id="profileName" value={profile.name || "Not available"} readOnly autoComplete="name" /></div>
               <div className="fingerprint-field"><label htmlFor="profileEmail">Email address</label><input id="profileEmail" value={profile.email || "Not available"} readOnly autoComplete="email" /></div>
-              <div className="fingerprint-field"><label htmlFor="mobileNumber">Mobile number <span className="fingerprint-optional">Optional</span></label><div className="fingerprint-phone-control"><select aria-label="Country and calling code" value={phoneCountry} onChange={(event) => setPhoneCountry(event.target.value)}>{phoneCountries.map((country) => <option key={country.id} value={country.id}>{country.flag} +{country.callingCode} · {country.name} ({country.id})</option>)}</select><input id="mobileNumber" type="tel" autoComplete="tel-national" value={mobileNumber} onChange={(event) => setMobileNumber(event.target.value)} placeholder="Mobile number" /></div></div>
+              <div className="fingerprint-field"><label htmlFor="mobileNumber">Mobile number <span className="fingerprint-optional">Optional</span></label><div className="fingerprint-phone-control"><PhoneCountryPicker value={phoneCountry} onChange={setPhoneCountry} /><input id="mobileNumber" type="tel" autoComplete="tel-national" value={mobileNumber} onChange={(event) => setMobileNumber(event.target.value)} placeholder="Mobile number" /></div></div>
             </div>
           </section>
         </div> : <div className="fingerprint-fields">
           <section className="fingerprint-form-section" aria-labelledby="company-details-heading">
-            <div className="fingerprint-section-heading"><span className="fingerprint-section-number">01</span><div><h3 id="company-details-heading">Company Meta Data Capturing – Screen 1</h3><p>Tell us about your company and your role.</p></div></div>
+            <div className="fingerprint-section-heading"><div><h3 id="company-details-heading">Company Details</h3><p>Tell us about your company and your role.</p></div></div>
             <div className="fingerprint-company-grid">
               <div className="fingerprint-field">
                 <label htmlFor="companyName">Company name <span className="fingerprint-required">*</span></label>
@@ -285,8 +310,7 @@ export function BusinessFingerprintForm() {
             </fieldset>
           </section>
 
-          <section className="fingerprint-form-section" aria-labelledby="business-snapshot-heading">
-            <div className="fingerprint-section-heading"><span className="fingerprint-section-number">02</span><div><h3 id="business-snapshot-heading">Company snapshot</h3><p>Help us understand your current scale and stage.</p></div></div>
+          <section className="fingerprint-form-section" aria-label="Company size and stage">
             <div className="fingerprint-snapshot-grid">
               <SelectField id="teamSize" label="Team size" value={details.teamSize} options={teamSizes} placeholder="Select team size" error={errors.teamSize} onChange={(value) => update("teamSize", value)} />
               <SelectField id="revenueRange" label="Annual revenue" value={details.revenueRange} options={revenueRanges} placeholder="Select revenue range" error={errors.revenueRange} onChange={(value) => update("revenueRange", value)} />
@@ -294,11 +318,10 @@ export function BusinessFingerprintForm() {
             </div>
           </section>
 
-          <div className="fingerprint-form-section fingerprint-company-extra-grid">
-            <div className="fingerprint-field"><label htmlFor="companyLocation">Location <span className="fingerprint-required">*</span></label><input id="companyLocation" autoComplete="country-name" value={details.country} aria-invalid={Boolean(errors.country)} aria-describedby={errors.country ? "companyLocation-error" : undefined} onChange={(event) => update("country", event.target.value)} placeholder="City, state, country" />{errors.country && <span className="fingerprint-error" id="companyLocation-error">{errors.country}</span>}</div>
+          <div className="fingerprint-company-extra-grid">
             <SelectField id="role" label="Role" value={role} options={roles} placeholder="Select your role" onChange={setRole} />
           </div>
-          <div hidden><LocationFields details={details} errors={errors} update={update} /></div>
+          <LocationFields details={details} errors={errors} update={update} />
         </div>}
 
         <div className="fingerprint-form-footer">

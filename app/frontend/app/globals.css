@@ -659,8 +659,20 @@ html.motion-ready .question-card:nth-child(4).is-visible { animation-delay: 210m
 .fingerprint-form-section { padding: 26px 30px 30px; border-top: 1px solid #edf1ee; background: #fff; }
 .fingerprint-company-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; }
 .fingerprint-company-grid > :first-child { grid-column: 1 / -1; }
-.fingerprint-phone-control { display: grid; grid-template-columns: minmax(150px, .85fr) minmax(0, 1fr); gap: 10px; }
-.fingerprint-phone-control select { min-width: 0; }
+.fingerprint-phone-control { display: grid; grid-template-columns: minmax(105px, .55fr) minmax(0, 1fr); gap: 10px; }
+.fingerprint-phone-picker { position: relative; min-width: 0; }
+.fingerprint-phone-picker > summary { width: 100%; height: 46px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid #dce5de; border-radius: 8px; color: #27382d; background: #fff; font-size: 12px; cursor: pointer; list-style: none; }
+.fingerprint-phone-picker > summary::-webkit-details-marker { display: none; }
+.fingerprint-phone-picker > summary:focus-visible { outline: 3px solid rgba(55,123,89,.28); outline-offset: 2px; }
+.fingerprint-flag { width: 24px; height: 18px; flex: 0 0 24px; display: inline-block; border: 1px solid rgba(39,56,45,.12); border-radius: 2px; background-position: center; background-size: cover; background-color: #f1f3f1; }
+.fingerprint-phone-chevron { margin-left: auto; color: #68786c; }
+.fingerprint-phone-menu { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; width: min(330px, 80vw); padding: 8px; border: 1px solid #dce5de; border-radius: 10px; background: #fff; box-shadow: 0 12px 30px rgba(34,58,43,.16); }
+.fingerprint-phone-menu > input { width: 100%; height: 40px; padding: 0 10px; border: 1px solid #dce5de; border-radius: 7px; color: #27382d; background: #fff; font: inherit; font-size: 12px; }
+.fingerprint-phone-options { max-height: 250px; overflow-y: auto; margin-top: 6px; }
+.fingerprint-phone-option { width: 100%; min-height: 38px; display: flex; align-items: center; gap: 9px; padding: 6px 8px; border: 0; border-radius: 6px; color: #35473b; background: transparent; font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
+.fingerprint-phone-option:hover,.fingerprint-phone-option[aria-selected="true"] { background: #f1f8f3; }
+.fingerprint-phone-country-name { flex: 1; }
+.fingerprint-phone-country-id { color: #839087; font-size: 10px; }
 .fingerprint-company-extra-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; }
 .fingerprint-company-extra-grid .fingerprint-section-heading { grid-column: 1 / -1; }
 .fingerprint-personal-grid > :first-child { grid-column: auto; }
@@ -677,7 +689,8 @@ html.motion-ready .question-card:nth-child(4).is-visible { animation-delay: 210m
 .fingerprint-form-footer { padding: 17px 30px 22px; border-top: 1px solid #edf1ee; background: #fbfcfb; }
 .fingerprint-notice { min-height: 16px; margin: 0 0 12px; color: #356e49; font-size: 11px; text-align: right; }
 .fingerprint-notice.is-error { color: #a64d3b; }
-.fingerprint-form-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.fingerprint-form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.fingerprint-form-actions > .fingerprint-save-exit:first-child { margin-right: auto; }
 .fingerprint-save-exit,.fingerprint-continue { min-height: 46px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; padding: 0 18px; border-radius: 8px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; transition: color .18s ease,border-color .18s ease,background .18s ease,box-shadow .18s ease; }
 .fingerprint-save-exit { border: 1px solid #dce6df; color: #526257; background: #fff; }
 .fingerprint-save-exit:hover { border-color: #b8cbbd; background: #f6faf7; }
@@ -1272,7 +1285,7 @@ html.motion-ready .question-card:nth-child(4).is-visible { animation-delay: 210m
   .fingerprint-company-grid,.fingerprint-snapshot-grid { grid-template-columns: minmax(0,1fr); gap: 18px; }
   .fingerprint-company-grid > :first-child { grid-column: auto; }
   .fingerprint-company-extra-grid { grid-template-columns: minmax(0,1fr); gap: 18px; }
-  .fingerprint-phone-control { grid-template-columns: minmax(0,1fr); }
+  .fingerprint-phone-control { grid-template-columns: minmax(115px,.7fr) minmax(0,1fr); }
   .fingerprint-form-section { padding: 21px 18px 24px; }
   .fingerprint-location-grid { grid-template-columns: minmax(0,1fr); gap: 19px; }
   .fingerprint-model-options { grid-template-columns: repeat(2,minmax(0,1fr)); }
