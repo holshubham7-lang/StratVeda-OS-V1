@@ -422,7 +422,10 @@ html.motion-ready .question-card:nth-child(4).is-visible { animation-delay: 210m
 .signup-panel h2 { margin: 13px 0 6px; color: #1d2939; font: 750 29px/1.2 var(--font-display); letter-spacing: -1.1px; }
 .signup-subtitle { margin: 0; color: #6b7787; font-size: 13px; line-height: 1.6; }
 .signup-provider-list { display: grid; gap: 12px; margin-top: 30px; }
-.signup-provider-button { position: relative; width: 100%; min-height: 52px; display: flex; align-items: center; justify-content: center; padding: 0 46px; border: 1px solid #d9dfe4; border-radius: 8px; color: #303943; background: #fff; cursor: pointer; font-size: 13px; font-weight: 650; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease; }
+.signup-consent { display: flex; align-items: flex-start; gap: 9px; margin-top: 22px; color: #5a6675; font: 400 11px/1.5 var(--font-body); cursor: pointer; }
+.signup-consent input { flex: 0 0 auto; width: 16px; height: 16px; margin: 1px 0 0; accent-color: var(--green); cursor: pointer; }
+.signup-consent a { color: var(--green); font-weight: 700; }
+.signup-consent a:hover { color: var(--green-deep); text-decoration: underline; }.signup-provider-button { position: relative; width: 100%; min-height: 52px; display: flex; align-items: center; justify-content: center; padding: 0 46px; border: 1px solid #d9dfe4; border-radius: 8px; color: #303943; background: #fff; cursor: pointer; font-size: 13px; font-weight: 650; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease; }
 .signup-provider-button:hover { transform: translateY(-1px); border-color: #adb9c2; background: #fcfdfd; box-shadow: 0 4px 12px rgba(28,42,54,.07); }
 .signup-provider-button:active { transform: translateY(0); }
 .signup-provider-button:focus-visible { outline-offset: 3px; }

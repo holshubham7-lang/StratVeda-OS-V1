@@ -37,6 +37,15 @@ export class User {
   @Prop({ trim: true, maxlength: 35 })
   locale?: string;
 
+  @Prop({ default: false })
+  acceptedTerms!: boolean;
+
+  @Prop()
+  termsAcceptedAt?: Date;
+
+  @Prop({ trim: true, maxlength: 40 })
+  termsVersion?: string;
+
   @Prop({ default: true })
   isActive!: boolean;
 }

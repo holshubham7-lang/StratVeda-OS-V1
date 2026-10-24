@@ -1,4 +1,4 @@
-import { IsString, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class MicrosoftCodeDto {
   @IsString()
@@ -15,4 +15,8 @@ export class MicrosoftCodeDto {
   @MinLength(16)
   @MaxLength(256)
   nonce!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  acceptedTerms?: boolean;
 }
