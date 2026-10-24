@@ -36,6 +36,7 @@ declare global {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001/api";
 const CONSENT_STORAGE_KEY = "signup_terms_consent";
+const CONSENT_STORAGE_KEY = "signup_terms_consent";
 
 function randomBase64Url(byteLength = 32) {
   const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
