@@ -97,7 +97,7 @@ function truncateBriefText(text: string, max: number): string {
   return `${cut.replace(/[,;:.\s]+$/, "")}…`;
 }
 
-export function DecisionCenterDashboard() {
+export function DecisionCenterDashboard({ showChatPanel = false }: { showChatPanel?: boolean }) {
   const [data, setData] = useState(emptyData);
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -161,7 +161,7 @@ export function DecisionCenterDashboard() {
     <>
       <a className="skip-link" href="#decision-center-main">Skip to content</a>
       <WelcomeHeader />
-      <div className="decision-center-layout">
+      <div className={`decision-center-layout${showChatPanel ? " has-chat-panel" : ""}`}>
         <DecisionCenterSidebar />
 
         <main id="decision-center-main" className="decision-center-main">
@@ -242,6 +242,27 @@ export function DecisionCenterDashboard() {
             <span className="decision-center-data-status"><i /> CONTEXT READY</span>
           </section>
         </main>
+        {showChatPanel && (
+          <aside className="decision-center-chat-panel" aria-label="Decision chat preview">
+            <div className="decision-center-chat-head">
+              <div><span>STRATVEDA ASSISTANT</span><h2>Decision chat</h2></div>
+              <span className="decision-center-chat-availability"><i /> Coming soon</span>
+            </div>
+            <div className="decision-center-chat-conversation" aria-live="polite">
+              <div className="decision-center-chat-agent-mark" aria-hidden="true">S</div>
+              <div className="decision-center-chat-message">
+                <span>STRATVEDA</span>
+                <p>Your workspace is ready. When chat is connected, bring a business question here and work through it with your company context in view.</p>
+              </div>
+              <div className="decision-center-chat-context"><span>YOUR CONTEXT</span><p>{data.companyName}{data.industry ? ` · ${data.industry}` : ""}</p></div>
+            </div>
+            <div className="decision-center-chat-compose">
+              <label className="sr-only" htmlFor="decision-chat-message">Write a message</label>
+              <textarea id="decision-chat-message" rows={4} disabled placeholder="Chat will be available here soon…" />
+              <div><span>Context stays with your workspace</span><button type="button" disabled aria-label="Send message">↑</button></div>
+            </div>
+          </aside>
+        )}
       </div>
       <WelcomeCopyrightFooter />
 
