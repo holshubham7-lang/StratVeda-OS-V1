@@ -114,7 +114,7 @@ function PhoneCountryPicker({ value, onChange }: { value: string; onChange: (id:
     <details className="fingerprint-phone-picker">
       <summary aria-label={`Country ${selected.name}, +${selected.callingCode}`}>
         <span className="fingerprint-flag" style={{ backgroundImage: `url(https://flagcdn.com/w40/${selected.id.toLowerCase()}.png)` }} aria-hidden="true" />
-        <span>+{selected.callingCode}</span><span className="fingerprint-phone-chevron" aria-hidden="true">⌄</span>
+        <span>+{selected.callingCode}</span><span className="fingerprint-phone-current-id">{selected.id}</span><span className="fingerprint-phone-chevron" aria-hidden="true">⌄</span>
       </summary>
       <div className="fingerprint-phone-menu">
         <input aria-label="Search countries" type="search" placeholder="Search country or code" value={search} onChange={(event) => setSearch(event.target.value)} />
@@ -132,7 +132,7 @@ function PhoneCountryPicker({ value, onChange }: { value: string; onChange: (id:
 }
 export function BusinessFingerprintForm() {
   const router = useRouter();
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2>(1);
   const [profile, setProfile] = useState<PersonalProfile>({ name: "", email: "" });
   const [phoneCountry, setPhoneCountry] = useState("IN");
   const [mobileNumber, setMobileNumber] = useState("");
@@ -239,10 +239,9 @@ export function BusinessFingerprintForm() {
 
   const handleContinue = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (step === 1) { setStep(2); setNotice(""); return; }
-    if (step === 2) {
+    if (step === 1) {
       if (!await saveDetails()) return;
-      setStep(3);
+      setStep(2);
       setNotice("");
       return;
     }
@@ -278,26 +277,25 @@ export function BusinessFingerprintForm() {
   return (
     <section className="fingerprint-shell" aria-labelledby="fingerprint-title">
       <div className="fingerprint-heading">
-        <p className="fingerprint-eyebrow">STEP {step} OF 3</p>
-        <h1 id="fingerprint-title">{step === 1 ? "Your personal details" : step === 2 ? "Company Details" : "Your problem statement"}</h1>
-        <p className="fingerprint-intro">{step === 1 ? "Confirm your signup details and add a mobile number." : step === 2 ? "Share a few details so we can build a useful picture of how your business works." : "Start with the decision or challenge you want to work through."}</p>
+        <p className="fingerprint-eyebrow">STEP {step} OF 2</p>
+        <h1 id="fingerprint-title">{step === 1 ? "Your details" : "Your problem statement"}</h1>
+        <p className="fingerprint-intro">{step === 1 ? "Confirm your signup details and tell us about your company." : "Start with the decision or challenge you want to work through."}</p>
       </div>
 
-      <div className="fingerprint-progress fingerprint-progress-three" aria-label={`Step ${step} of 3`}>
-        <span className={step === 1 ? "is-current" : "is-complete"}/><span className={step === 2 ? "is-current" : step === 3 ? "is-complete" : ""}/><span className={step === 3 ? "is-current" : ""}/>
+      <div className="fingerprint-progress" aria-label={`Step ${step} of 2`}>
+        <span className={step === 1 ? "is-current" : "is-complete"}/><span className={step === 2 ? "is-current" : ""}/>
       </div>
 
       <form className="fingerprint-form" noValidate onSubmit={handleContinue}>
         {step === 1 ? <div className="fingerprint-fields">
-          <section className="fingerprint-form-section" aria-labelledby="personal-details-heading">
-            <div className="fingerprint-section-heading"><span className="fingerprint-section-number">01</span><div><h3 id="personal-details-heading">Personal details</h3><p>These details come from your signup profile.</p></div></div>
+          <section className="fingerprint-form-section fingerprint-personal-section" aria-labelledby="personal-details-heading">
+            <div className="fingerprint-section-heading"><div><h3 id="personal-details-heading">Personal details</h3><p>These details come from your signup profile.</p></div></div>
             <div className="fingerprint-company-grid fingerprint-personal-grid">
               <div className="fingerprint-field"><label htmlFor="profileName">Full name</label><input id="profileName" value={profile.name || "Not available"} readOnly autoComplete="name" /></div>
               <div className="fingerprint-field"><label htmlFor="profileEmail">Email address</label><input id="profileEmail" value={profile.email || "Not available"} readOnly autoComplete="email" /></div>
               <div className="fingerprint-field"><label htmlFor="mobileNumber">Mobile number <span className="fingerprint-optional">Optional</span></label><div className="fingerprint-phone-control"><PhoneCountryPicker value={phoneCountry} onChange={setPhoneCountry} /><input id="mobileNumber" type="tel" autoComplete="tel-national" value={mobileNumber} onChange={(event) => setMobileNumber(event.target.value)} placeholder="Mobile number" /></div></div>
             </div>
           </section>
-        </div> : step === 2 ? <div className="fingerprint-fields">
           <section className="fingerprint-form-section" aria-labelledby="company-details-heading">
             <div className="fingerprint-section-heading"><div><h3 id="company-details-heading">Company Details</h3><p>Tell us about your company and your role.</p></div></div>
             <div className="fingerprint-company-grid">
@@ -355,9 +353,9 @@ export function BusinessFingerprintForm() {
         <div className="fingerprint-form-footer">
           <p className={notice.startsWith("Check") ? "fingerprint-notice is-error" : "fingerprint-notice"} role="status" aria-live="polite">{notice}</p>
           <div className="fingerprint-form-actions">
-            {step === 2 && <button className="fingerprint-save-exit" type="button" onClick={() => void handleSaveAndExit()} disabled={isSaving}>{isSaving ? "Saving…" : "Save & Exit"}</button>}
-            {step > 1 && <button className="fingerprint-save-exit" type="button" onClick={() => { setStep(step === 3 ? 2 : 1); setNotice(""); }}>Back</button>}
-            <button className="fingerprint-continue" type="submit" disabled={isSaving}>{step === 2 && isSaving ? "Saving…" : <>Continue <span aria-hidden="true">→</span></>}</button>
+            {step === 1 && <button className="fingerprint-save-exit" type="button" onClick={() => void handleSaveAndExit()} disabled={isSaving}>{isSaving ? "Saving…" : "Save & Exit"}</button>}
+            {step > 1 && <button className="fingerprint-save-exit" type="button" onClick={() => { setStep(1); setNotice(""); }}>Back</button>}
+            <button className="fingerprint-continue" type="submit" disabled={isSaving}>{step === 1 && isSaving ? "Saving…" : <>Continue <span aria-hidden="true">→</span></>}</button>
           </div>
         </div>
       </form>

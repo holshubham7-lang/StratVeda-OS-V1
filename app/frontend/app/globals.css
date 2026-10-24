@@ -666,13 +666,17 @@ html.motion-ready .question-card:nth-child(4).is-visible { animation-delay: 210m
 .fingerprint-phone-picker > summary { width: 100%; height: 46px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid #dce5de; border-radius: 8px; color: #27382d; background: #fff; font-size: 12px; cursor: pointer; list-style: none; }
 .fingerprint-phone-picker > summary::-webkit-details-marker { display: none; }
 .fingerprint-phone-picker > summary:focus-visible { outline: 3px solid rgba(55,123,89,.28); outline-offset: 2px; }
+.fingerprint-phone-picker > summary:hover { border-color: #b8cbbd; background: #fbfdfb; }
 .fingerprint-flag { width: 24px; height: 18px; flex: 0 0 24px; display: inline-block; border: 1px solid rgba(39,56,45,.12); border-radius: 2px; background-position: center; background-size: cover; background-color: #f1f3f1; }
+.fingerprint-phone-current-id { color: #839087; font-size: 10px; font-weight: 650; }
 .fingerprint-phone-chevron { margin-left: auto; color: #68786c; }
-.fingerprint-phone-menu { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; width: min(330px, 80vw); padding: 8px; border: 1px solid #dce5de; border-radius: 10px; background: #fff; box-shadow: 0 12px 30px rgba(34,58,43,.16); }
-.fingerprint-phone-menu > input { width: 100%; height: 40px; padding: 0 10px; border: 1px solid #dce5de; border-radius: 7px; color: #27382d; background: #fff; font: inherit; font-size: 12px; }
-.fingerprint-phone-options { max-height: 250px; overflow-y: auto; margin-top: 6px; }
-.fingerprint-phone-option { width: 100%; min-height: 38px; display: flex; align-items: center; gap: 9px; padding: 6px 8px; border: 0; border-radius: 6px; color: #35473b; background: transparent; font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
+.fingerprint-phone-menu { position: absolute; z-index: 20; top: calc(100% + 7px); left: 0; width: min(320px, calc(100vw - 40px)); max-height: min(285px, calc(100vh - 190px)); display: grid; grid-template-rows: auto minmax(0,1fr); gap: 7px; padding: 9px; border: 1px solid #dce5de; border-radius: 12px; background: #fff; box-shadow: 0 16px 38px rgba(34,58,43,.18); }
+.fingerprint-phone-menu > input { width: 100%; height: 38px; padding: 0 11px; border: 1px solid #dce5de; border-radius: 8px; outline: none; color: #27382d; background: #fff; font: inherit; font-size: 12px; }
+.fingerprint-phone-menu > input:focus { border-color: #72a182; box-shadow: 0 0 0 3px rgba(55,123,89,.1); }
+.fingerprint-phone-options { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-color: #c9d6cc transparent; scrollbar-width: thin; }
+.fingerprint-phone-option { width: 100%; min-height: 36px; display: flex; align-items: center; gap: 9px; padding: 6px 8px; border: 0; border-radius: 7px; color: #35473b; background: transparent; font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
 .fingerprint-phone-option:hover,.fingerprint-phone-option[aria-selected="true"] { background: #f1f8f3; }
+.fingerprint-phone-option[aria-selected="true"] { color: #27623f; font-weight: 700; }
 .fingerprint-phone-country-name { flex: 1; }
 .fingerprint-phone-country-id { color: #839087; font-size: 10px; }
 .fingerprint-company-extra-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; }
