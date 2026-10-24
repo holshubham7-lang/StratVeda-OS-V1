@@ -367,8 +367,7 @@ export default function SignUpPage() {
           <div className="signup-form-wrap">
             <span className="signup-eyebrow">GET STARTED</span>
             <h2 id="signup-title">Create your account</h2>
-            <p className="signup-subtitle">Choose a secure sign-in method to get started.</p>
-            <p className="signup-legal">By creating an account or continuing with a provider, you agree to StratVeda's <a href="/terms" target="_blank" rel="noopener noreferrer">Terms &amp; Conditions</a> and acknowledge the <a href="/privacy-policy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</p>
+            <p className="signup-subtitle">Choose how you’d like to create your account.</p>
 
             <div className="signup-provider-list" aria-label="Sign up with a provider">
               <button className="signup-provider-button" type="button" onClick={handleGoogleSignup} disabled={busyProvider !== null}><GoogleMark/><span>{busyProvider === "google" ? "Connecting…" : "Continue with Google"}</span></button>
@@ -392,6 +391,7 @@ export default function SignUpPage() {
               <button className="signup-create-button" type="submit" disabled={busyProvider !== null}>{busyProvider === "password" ? "Creating account…" : <>Create account <span aria-hidden="true">→</span></>}</button>
               <p className="signup-form-note">Use at least 8 characters for your password.</p>
             </form>
+            <p className="signup-legal">By creating an account or continuing with a provider, you agree to StratVeda's <a href="/terms" target="_blank" rel="noopener noreferrer">Terms &amp; Conditions</a> and acknowledge the <a href="/privacy-policy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</p>
             <p className="signup-switch">Already have an account? <a href="/sign-in">Sign in</a></p>
           </div>
         </section>
