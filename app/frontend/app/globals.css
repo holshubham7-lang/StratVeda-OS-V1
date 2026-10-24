@@ -630,7 +630,7 @@ html.motion-ready .question-card:nth-child(4).is-visible { animation-delay: 210m
 .fingerprint-eyebrow span { padding-inline: 4px; color: #a1b2a6; }
 .fingerprint-heading h1 { margin: 0; color: #183024; font: 800 clamp(30px,4vw,40px)/1.16 var(--font-display); letter-spacing: -1.2px; }
 .fingerprint-intro { max-width: 580px; margin: 12px auto 0; color: #627267; font-size: 14px; line-height: 1.65; }
-.fingerprint-progress { width: min(340px,100%); display: grid; grid-template-columns: repeat(5,1fr); gap: 6px; margin: 25px auto 22px; }
+.fingerprint-progress { width: min(340px,100%); display: grid; grid-template-columns: repeat(2,1fr); gap: 6px; margin: 25px auto 22px; }
 .fingerprint-progress span { height: 4px; border-radius: 9px; background: #dce7de; }
 .fingerprint-progress span.is-complete { background: #8db69a; }
 .fingerprint-progress span.is-current { background: var(--green); }
@@ -659,6 +659,11 @@ html.motion-ready .question-card:nth-child(4).is-visible { animation-delay: 210m
 .fingerprint-form-section { padding: 26px 30px 30px; border-top: 1px solid #edf1ee; background: #fff; }
 .fingerprint-company-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; }
 .fingerprint-company-grid > :first-child { grid-column: 1 / -1; }
+.fingerprint-phone-control { display: grid; grid-template-columns: minmax(150px, .85fr) minmax(0, 1fr); gap: 10px; }
+.fingerprint-phone-control select { min-width: 0; }
+.fingerprint-company-extra-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 20px; }
+.fingerprint-company-extra-grid .fingerprint-section-heading { grid-column: 1 / -1; }
+.fingerprint-personal-grid > :first-child { grid-column: auto; }
 .fingerprint-snapshot-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; }
 .fingerprint-section-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 21px; }
 .fingerprint-section-number { width: 31px; height: 31px; flex: 0 0 31px; display: grid; place-items: center; border: 1px solid #dce8df; border-radius: 9px; color: var(--green); background: #f2f8f4; font: 800 11px var(--font-display); }
@@ -1266,6 +1271,8 @@ html.motion-ready .question-card:nth-child(4).is-visible { animation-delay: 210m
   .fingerprint-fields { padding: 0; }
   .fingerprint-company-grid,.fingerprint-snapshot-grid { grid-template-columns: minmax(0,1fr); gap: 18px; }
   .fingerprint-company-grid > :first-child { grid-column: auto; }
+  .fingerprint-company-extra-grid { grid-template-columns: minmax(0,1fr); gap: 18px; }
+  .fingerprint-phone-control { grid-template-columns: minmax(0,1fr); }
   .fingerprint-form-section { padding: 21px 18px 24px; }
   .fingerprint-location-grid { grid-template-columns: minmax(0,1fr); gap: 19px; }
   .fingerprint-model-options { grid-template-columns: repeat(2,minmax(0,1fr)); }
