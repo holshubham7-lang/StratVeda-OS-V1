@@ -96,7 +96,7 @@ export class AuthController {
     this.assertTrustedOrigin(origin);
     const redirectUri = `${origin}/api/auth/oauth/linkedin/callback`;
     return this.completeLogin(
-      await this.auth.signupWithLinkedInCode(body.code, redirectUri, requestMetadata(request)),
+      await this.auth.signupWithLinkedInCode(body.code, redirectUri, requestMetadata(request), body.acceptedTerms),
       response,
     );
   }
@@ -118,6 +118,7 @@ export class AuthController {
         body.codeVerifier,
         body.nonce,
         requestMetadata(request),
+        body.acceptedTerms,
       ),
       response,
     );
@@ -136,7 +137,7 @@ export class AuthController {
       throw new ForbiddenException('Google authorization request could not be verified');
     }
     this.assertTrustedOrigin(origin);
-    return this.completeLogin(await this.auth.signupWithGoogleCode(body.code, origin!, requestMetadata(request)), response);
+    return this.completeLogin(await this.auth.signupWithGoogleCode(body.code, origin!, requestMetadata(request), body.acceptedTerms), response);
   }
 
   @Post('logout')
@@ -165,6 +166,6 @@ export class AuthController {
       throw new BadRequestException('Provider must be google, microsoft, or linkedin');
     }
     this.assertTrustedOrigin(origin);
-    return this.completeLogin(await this.auth.signup(provider as Provider, body.idToken, requestMetadata(request)), response);
+    return this.completeLogin(await this.auth.signup(provider as Provider, body.idToken, requestMetadata(request), undefined, body.acceptedTerms), response);
   }
 }

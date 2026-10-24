@@ -28,6 +28,13 @@ export interface ActivityRequestMetadata {
   deviceHint?: string;
 }
 
+const TERMS_VERSION = '2026-10-24';
+
+function consentRecord(acceptedTerms?: boolean) {
+  if (!acceptedTerms) return {};
+  return { acceptedTerms: true, termsAcceptedAt: new Date(), termsVersion: TERMS_VERSION };
+}
+
 @Injectable()
 export class AuthService implements OnModuleInit {
   constructor(
@@ -53,21 +60,22 @@ export class AuthService implements OnModuleInit {
     idToken: string,
     metadata?: ActivityRequestMetadata,
     expectedNonce?: string,
+    acceptedTerms?: boolean,
   ) {
     const identity = await this.socialTokens.verify(provider, idToken, expectedNonce);
-    return this.completeSocialSession(identity, metadata);
+    return this.completeSocialSession(identity, metadata, acceptedTerms);
   }
 
-  async signupWithLinkedInCode(code: string, redirectUri: string, metadata?: ActivityRequestMetadata) {
+  async signupWithLinkedInCode(code: string, redirectUri: string, metadata?: ActivityRequestMetadata, acceptedTerms?: boolean) {
     const identity = await this.socialTokens.authenticateLinkedIn(code, redirectUri);
-    return this.completeSocialSession(identity, metadata);
+    return this.completeSocialSession(identity, metadata, acceptedTerms);
   }
 
-  private async completeSocialSession(identity: SocialIdentity, metadata?: ActivityRequestMetadata) {
+  private async completeSocialSession(identity: SocialIdentity, metadata?: ActivityRequestMetadata, acceptedTerms?: boolean) {
     let user = await this.users.findOne({ provider: identity.provider, providerSubject: identity.subject });
 
     const isNewUser = !user;
-    if (!user) user = await this.createUser(identity);
+    if (!user) user = await this.createUser(identity, acceptedTerms);
     else user = await this.updateUserProfile(user, identity);
     if (!user.isActive) throw new UnauthorizedException('This account is disabled');
 
@@ -97,7 +105,7 @@ export class AuthService implements OnModuleInit {
     };
   }
 
-  async registerWithPassword(name: string, email: string, password: string, metadata?: ActivityRequestMetadata) {
+  async registerWithPassword(name: string, email: string, password: string, metadata?: ActivityRequestMetadata, acceptedTerms?: boolean) {
     const normalizedEmail = email.trim().toLowerCase();
     if (await this.users.exists({ email: normalizedEmail })) {
       throw new ConflictException('An account with this email already exists. Sign in instead.');
@@ -112,6 +120,7 @@ export class AuthService implements OnModuleInit {
         emailVerified: false, name: name.trim(), givenName,
         familyName: familyParts.join(' ') || undefined,
         passwordHash: `scrypt$32768$8$1$${salt}$${key.toString('hex')}`,
+        ...consentRecord(acceptedTerms),
       });
     } catch (error) {
       if ((error as { code?: number }).code === 11000) {
@@ -148,9 +157,9 @@ export class AuthService implements OnModuleInit {
     return { accessToken, tokenType: 'Bearer', expiresIn: this.expirationInSeconds() };
   }
 
-  async signupWithGoogleCode(code: string, redirectUri: string, metadata?: ActivityRequestMetadata) {
+  async signupWithGoogleCode(code: string, redirectUri: string, metadata?: ActivityRequestMetadata, acceptedTerms?: boolean) {
     const idToken = await this.socialTokens.exchangeGoogleCode(code, redirectUri);
-    return this.signup('google', idToken, metadata);
+    return this.signup('google', idToken, metadata, undefined, acceptedTerms);
   }
 
   async signupWithMicrosoftCode(
@@ -159,9 +168,10 @@ export class AuthService implements OnModuleInit {
     codeVerifier: string,
     nonce: string,
     metadata?: ActivityRequestMetadata,
+    acceptedTerms?: boolean,
   ) {
     const idToken = await this.socialTokens.exchangeMicrosoftCode(code, redirectUri, codeVerifier);
-    return this.signup('microsoft', idToken, metadata, nonce);
+    return this.signup('microsoft', idToken, metadata, nonce, acceptedTerms);
   }
 
   async logout(jti: string, expiresAt: number) {
@@ -201,7 +211,7 @@ export class AuthService implements OnModuleInit {
     return Number(match[1]) * multipliers[match[2] as keyof typeof multipliers];
   }
 
-  private async createUser(identity: SocialIdentity): Promise<UserDocument> {
+  private async createUser(identity: SocialIdentity, acceptedTerms?: boolean): Promise<UserDocument> {
     let email = identity.email;
     if (identity.email) {
       const existingEmail = await this.users.exists({ email: identity.email });
@@ -221,6 +231,7 @@ export class AuthService implements OnModuleInit {
         familyName: identity.familyName,
         picture: identity.picture,
         locale: identity.locale,
+        ...consentRecord(acceptedTerms),
       });
     } catch (error) {
       // A concurrent first login may win the unique index between the lookup and insert.

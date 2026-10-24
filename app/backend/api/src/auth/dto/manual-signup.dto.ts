@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { Equals, IsBoolean, IsEmail, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 
 export class ManualSignupDto {
   @IsString()
@@ -18,4 +18,8 @@ export class ManualSignupDto {
   @MinLength(8)
   @MaxLength(128)
   password!: string;
+
+  @IsBoolean({ message: 'You must accept the Terms & Conditions and Privacy Policy.' })
+  @Equals(true, { message: 'You must accept the Terms & Conditions and Privacy Policy.' })
+  acceptedTerms!: boolean;
 }

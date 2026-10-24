@@ -38,7 +38,7 @@ export class ManualAuthController {
     @Res({ passthrough: true }) response: Response,
   ) {
     this.assertTrustedOrigin(origin);
-    const result = await this.auth.registerWithPassword(body.name, body.email, body.password, this.metadata(request));
+    const result = await this.auth.registerWithPassword(body.name, body.email, body.password, this.metadata(request), body.acceptedTerms);
     return this.completeLogin(result, response);
   }
 
