@@ -35,7 +35,6 @@ declare global {
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001/api";
-const CONSENT_STORAGE_KEY = "signup_terms_consent";
 
 function randomBase64Url(byteLength = 32) {
   const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
@@ -79,7 +78,6 @@ export default function SignUpPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [socialConfig, setSocialConfig] = useState<SocialConfig | null>(null);
   const [busyProvider, setBusyProvider] = useState<string | null>(null);
-  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const googleCodeClientRef = useRef<{ requestCode: () => void } | null>(null);
   const googleAttemptActiveRef = useRef(false);
 
@@ -193,9 +191,7 @@ export default function SignUpPage() {
   }
 
   async function postSocialSignup(path: string, body: object, extraHeaders: Record<string, string> = {}) {
-    const consented = window.sessionStorage.getItem(CONSENT_STORAGE_KEY) === "1";
-    if (consented) window.sessionStorage.removeItem(CONSENT_STORAGE_KEY);
-    const payload = consented ? { ...body, acceptedTerms: true } : body;
+    const payload = { ...body, acceptedTerms: true };
     try {
       const response = await fetch(`${API_BASE}/auth/social/${path}`, {
         method: "POST",
@@ -215,10 +211,6 @@ export default function SignUpPage() {
 
   async function handleCreateAccount(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!acceptedTerms) {
-      showNotice("Please accept the Terms & Conditions and Privacy Policy to continue.", "error");
-      return;
-    }
     const form = event.currentTarget;
     const name = form.elements.namedItem("name") as HTMLInputElement;
     const email = form.elements.namedItem("email") as HTMLInputElement;
@@ -267,11 +259,6 @@ export default function SignUpPage() {
       showNotice("Google sign-in is not ready yet. Please try again shortly.", "error");
       return;
     }
-    if (!acceptedTerms) {
-      showNotice("Please accept the Terms & Conditions and Privacy Policy to continue.", "error");
-      return;
-    }
-    window.sessionStorage.setItem(CONSENT_STORAGE_KEY, "1");
     googleAttemptActiveRef.current = true;
     setBusyProvider("google");
     try {
@@ -302,17 +289,12 @@ export default function SignUpPage() {
       showNotice("Microsoft sign-in is not configured.", "error");
       return;
     }
-    if (!acceptedTerms) {
-      showNotice("Please accept the Terms & Conditions and Privacy Policy to continue.", "error");
-      return;
-    }
     setBusyProvider("microsoft");
     try {
       const state = `signup.${randomBase64Url()}`;
       const nonce = randomBase64Url();
       const verifier = randomBase64Url(48);
       const challenge = await createCodeChallenge(verifier);
-      window.sessionStorage.setItem(CONSENT_STORAGE_KEY, "1");
       window.sessionStorage.setItem("microsoft_oauth_state", state);
       window.sessionStorage.setItem("microsoft_oauth_nonce", nonce);
       window.sessionStorage.setItem("microsoft_oauth_verifier", verifier);
@@ -341,12 +323,7 @@ export default function SignUpPage() {
       showNotice("LinkedIn sign-in is not configured.", "error");
       return;
     }
-    if (!acceptedTerms) {
-      showNotice("Please accept the Terms & Conditions and Privacy Policy to continue.", "error");
-      return;
-    }
     const state = `signup.${crypto.randomUUID()}`;
-    window.sessionStorage.setItem(CONSENT_STORAGE_KEY, "1");
     window.sessionStorage.setItem("linkedin_oauth_state", state);
     const authorizeUrl = new URL("https://www.linkedin.com/oauth/v2/authorization");
     authorizeUrl.search = new URLSearchParams({
@@ -391,11 +368,7 @@ export default function SignUpPage() {
             <span className="signup-eyebrow">GET STARTED</span>
             <h2 id="signup-title">Create your account</h2>
             <p className="signup-subtitle">Choose a secure sign-in method to get started.</p>
-
-            <label className="signup-consent">
-              <input type="checkbox" name="terms" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)}/>
-              <span>I agree to StratVeda's <a href="/terms" target="_blank" rel="noopener noreferrer">Terms &amp; Conditions</a> and <a href="/privacy-policy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</span>
-            </label>
+            <p className="signup-legal">By creating an account or continuing with a provider, you agree to StratVeda's <a href="/terms" target="_blank" rel="noopener noreferrer">Terms &amp; Conditions</a> and acknowledge the <a href="/privacy-policy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</p>
 
             <div className="signup-provider-list" aria-label="Sign up with a provider">
               <button className="signup-provider-button" type="button" onClick={handleGoogleSignup} disabled={busyProvider !== null}><GoogleMark/><span>{busyProvider === "google" ? "Connecting…" : "Continue with Google"}</span></button>

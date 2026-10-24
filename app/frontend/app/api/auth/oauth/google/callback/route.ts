@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
         origin: request.headers.get("origin") ?? new URL(request.url).origin,
       },
       cache: "no-store",
-      body: JSON.stringify({ idToken: credential }),
+      body: JSON.stringify({ idToken: credential, acceptedTerms: true }),
     });
     if (!response.ok) return signupRedirect(request);
 
