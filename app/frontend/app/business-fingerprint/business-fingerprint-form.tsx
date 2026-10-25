@@ -1,7 +1,23 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, KeyboardEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { IconDefinition } from "@fortawesome/fontawesome-svg-core";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import {
+  faBriefcase,
+  faBuilding,
+  faChartLine,
+  faChevronDown,
+  faEnvelope,
+  faFlag,
+  faGlobe,
+  faLayerGroup,
+  faLocationDot,
+  faPhone,
+  faUser,
+  faUsers,
+} from "@fortawesome/free-solid-svg-icons";
 import { beginOnboardingTransition } from "../../components/onboarding-route-transition";
 import { setFlashNotice } from "../../components/feedback-toast";
 import { countryPhoneCodes } from "./country-phone-codes";
@@ -44,6 +60,15 @@ const problemStatementStorageKey = "stratveda-problem-statement-draft";
 
 type PersonalProfile = { name: string; email: string };
 
+function FieldIconLabel({ htmlFor, icon, children }: { htmlFor: string; icon: IconDefinition; children: ReactNode }) {
+  return (
+    <label className="fingerprint-label-with-icon" htmlFor={htmlFor}>
+      <FontAwesomeIcon icon={icon} aria-hidden="true" />
+      <span>{children}</span>
+    </label>
+  );
+}
+
 function normalizedWebsite(value: string) {
   const website = value.trim();
   if (!website) return "";
@@ -62,16 +87,101 @@ function readDraft(): BusinessDetails | null {
   }
 }
 
-function SelectField({ id, label, value, options, placeholder, error, onChange }: {
-  id: string; label: string; value: string; options: string[]; placeholder: string; error?: string; onChange: (value: string) => void;
+function SelectField({ id, label, icon, value, options, placeholder, error, onChange }: {
+  id: string; label: string; icon: IconDefinition; value: string; options: string[]; placeholder: string; error?: string; onChange: (value: string) => void;
 }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const selectedIndex = options.indexOf(value);
+  const listId = `${id}-options`;
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setIsOpen(false);
+    };
+    const focusIndex = selectedIndex >= 0 ? selectedIndex : 0;
+    const frame = window.requestAnimationFrame(() => optionRefs.current[focusIndex]?.focus());
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+    };
+  }, [isOpen, selectedIndex]);
+
+  function focusOption(index: number) {
+    const wrappedIndex = (index + options.length) % options.length;
+    optionRefs.current[wrappedIndex]?.focus();
+  }
+
+  function handleTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      setIsOpen(true);
+    } else if (event.key === "Escape" && isOpen) {
+      event.preventDefault();
+      setIsOpen(false);
+    }
+  }
+
+  function handleOptionKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    if (event.key === "ArrowDown") { event.preventDefault(); focusOption(index + 1); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); focusOption(index - 1); }
+    else if (event.key === "Home") { event.preventDefault(); focusOption(0); }
+    else if (event.key === "End") { event.preventDefault(); focusOption(options.length - 1); }
+    else if (event.key === "Escape") {
+      event.preventDefault();
+      setIsOpen(false);
+      triggerRef.current?.focus();
+    }
+  }
+
   return (
-    <div className="fingerprint-field">
-      <label htmlFor={id}>{label} <span className="fingerprint-required">*</span></label>
-      <select id={id} required aria-required="true" value={value} aria-invalid={Boolean(error)} aria-describedby={error ? `${id}-error` : undefined} onChange={(event) => onChange(event.target.value)}>
-        <option value="">{placeholder}</option>
-        {options.map((option) => <option key={option} value={option}>{option}</option>)}
-      </select>
+    <div
+      ref={rootRef}
+      className={`fingerprint-field fingerprint-select-field${isOpen ? " is-open" : ""}`}
+      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setIsOpen(false); }}
+    >
+      <FieldIconLabel htmlFor={`${id}-trigger`} icon={icon}>{label} <span className="fingerprint-required">*</span></FieldIconLabel>
+      <button
+        ref={triggerRef}
+        id={`${id}-trigger`}
+        className={`fingerprint-select-trigger${value ? "" : " is-placeholder"}`}
+        type="button"
+        role="combobox"
+        aria-label={label}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-controls={listId}
+        aria-required="true"
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? `${id}-error` : undefined}
+        onClick={() => setIsOpen((open) => !open)}
+        onKeyDown={handleTriggerKeyDown}
+      >
+        <span>{value || placeholder}</span>
+        <FontAwesomeIcon icon={faChevronDown} aria-hidden="true" />
+      </button>
+      <div id={listId} className="fingerprint-select-menu" role="listbox" aria-label={label} aria-hidden={!isOpen} inert={!isOpen}>
+        {options.map((option, index) => (
+          <button
+            ref={(element) => { optionRefs.current[index] = element; }}
+            className="fingerprint-select-option"
+            type="button"
+            role="option"
+            aria-selected={value === option}
+            tabIndex={-1}
+            key={option}
+            onClick={() => { onChange(option); setIsOpen(false); triggerRef.current?.focus(); }}
+            onKeyDown={(event) => handleOptionKeyDown(event, index)}
+          >
+            <span>{option}</span>
+            {value === option && <span className="fingerprint-select-check" aria-hidden="true">✓</span>}
+          </button>
+        ))}
+      </div>
       {error && <span className="fingerprint-error" id={`${id}-error`}>{error}</span>}
     </div>
   );
@@ -84,19 +194,19 @@ function LocationFields({ details, errors, update }: {
 }) {
   return (
     <section className="fingerprint-form-section" aria-labelledby="location-heading">
-      <div className="fingerprint-section-heading"><div><h3 id="location-heading">Location</h3><p>Choose your company’s primary location.</p></div></div>
+      <div className="fingerprint-section-heading"><div><h2 id="location-heading">Location</h2><p>Choose your company’s primary location.</p></div></div>
       <div className="fingerprint-location-grid">
         <div className="fingerprint-field">
-          <label htmlFor="country">Country <span className="fingerprint-required">*</span></label>
+          <FieldIconLabel htmlFor="country" icon={faGlobe}>Country <span className="fingerprint-required">*</span></FieldIconLabel>
           <input id="country" name="country" autoComplete="country-name" required value={details.country} maxLength={100} aria-invalid={Boolean(errors.country)} aria-describedby={errors.country ? "country-error" : undefined} onChange={(event) => update("country", event.target.value)} placeholder="Enter country" />
           {errors.country && <span className="fingerprint-error" id="country-error">{errors.country}</span>}
         </div>
         <div className="fingerprint-field">
-          <label htmlFor="state">State / province <span className="fingerprint-optional">Optional</span></label>
+          <FieldIconLabel htmlFor="state" icon={faLocationDot}>State / province <span className="fingerprint-optional">Optional</span></FieldIconLabel>
           <input id="state" name="state" autoComplete="address-level1" value={details.state} maxLength={100} onChange={(event) => update("state", event.target.value)} placeholder="Enter state or province" />
         </div>
         <div className="fingerprint-field">
-          <label htmlFor="city">City <span className="fingerprint-optional">Optional</span></label>
+          <FieldIconLabel htmlFor="city" icon={faLocationDot}>City <span className="fingerprint-optional">Optional</span></FieldIconLabel>
           <input id="city" name="city" autoComplete="address-level2" value={details.city} maxLength={100} aria-invalid={Boolean(errors.city)} aria-describedby={errors.city ? "city-error" : "city-hint"} onChange={(event) => update("city", event.target.value)} placeholder="Enter city" />
           {errors.city ? <span className="fingerprint-error" id="city-error">{errors.city}</span> : <span className="fingerprint-hint" id="city-hint">Maximum 100 characters.</span>}
         </div>
@@ -114,7 +224,7 @@ function PhoneCountryPicker({ value, onChange }: { value: string; onChange: (id:
     <details className="fingerprint-phone-picker">
       <summary aria-label={`Country ${selected.name}, +${selected.callingCode}`}>
         <span className="fingerprint-flag" style={{ backgroundImage: `url(https://flagcdn.com/w40/${selected.id.toLowerCase()}.png)` }} aria-hidden="true" />
-        <span>+{selected.callingCode}</span><span className="fingerprint-phone-chevron" aria-hidden="true">⌄</span>
+        <span>+{selected.callingCode}</span><span className="fingerprint-phone-current-id">{selected.id}</span><span className="fingerprint-phone-chevron" aria-hidden="true">⌄</span>
       </summary>
       <div className="fingerprint-phone-menu">
         <input aria-label="Search countries" type="search" placeholder="Search country or code" value={search} onChange={(event) => setSearch(event.target.value)} />
@@ -132,7 +242,7 @@ function PhoneCountryPicker({ value, onChange }: { value: string; onChange: (id:
 }
 export function BusinessFingerprintForm() {
   const router = useRouter();
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2>(1);
   const [profile, setProfile] = useState<PersonalProfile>({ name: "", email: "" });
   const [phoneCountry, setPhoneCountry] = useState("IN");
   const [mobileNumber, setMobileNumber] = useState("");
@@ -239,10 +349,9 @@ export function BusinessFingerprintForm() {
 
   const handleContinue = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (step === 1) { setStep(2); setNotice(""); return; }
-    if (step === 2) {
+    if (step === 1) {
       if (!await saveDetails()) return;
-      setStep(3);
+      setStep(2);
       setNotice("");
       return;
     }
@@ -278,40 +387,39 @@ export function BusinessFingerprintForm() {
   return (
     <section className="fingerprint-shell" aria-labelledby="fingerprint-title">
       <div className="fingerprint-heading">
-        <p className="fingerprint-eyebrow">STEP {step} OF 3</p>
-        <h1 id="fingerprint-title">{step === 1 ? "Your personal details" : step === 2 ? "Company Details" : "Your problem statement"}</h1>
-        <p className="fingerprint-intro">{step === 1 ? "Confirm your signup details and add a mobile number." : step === 2 ? "Share a few details so we can build a useful picture of how your business works." : "Start with the decision or challenge you want to work through."}</p>
+        <p className="fingerprint-eyebrow">STEP {step} OF 2</p>
+        <h1 id="fingerprint-title">{step === 1 ? "Personal and company details" : "Your problem statement"}</h1>
+        <p className="fingerprint-intro">{step === 1 ? "Confirm your signup details, then tell us about your company." : "Start with the decision or challenge you want to work through."}</p>
       </div>
 
-      <div className="fingerprint-progress fingerprint-progress-three" aria-label={`Step ${step} of 3`}>
-        <span className={step === 1 ? "is-current" : "is-complete"}/><span className={step === 2 ? "is-current" : step === 3 ? "is-complete" : ""}/><span className={step === 3 ? "is-current" : ""}/>
+      <div className="fingerprint-progress" aria-label={`Step ${step} of 2`}>
+        <span className={step === 1 ? "is-current" : "is-complete"}/><span className={step === 2 ? "is-current" : ""}/>
       </div>
 
       <form className="fingerprint-form" noValidate onSubmit={handleContinue}>
         {step === 1 ? <div className="fingerprint-fields">
-          <section className="fingerprint-form-section" aria-labelledby="personal-details-heading">
-            <div className="fingerprint-section-heading"><span className="fingerprint-section-number">01</span><div><h3 id="personal-details-heading">Personal details</h3><p>These details come from your signup profile.</p></div></div>
+          <section className="fingerprint-form-section fingerprint-personal-section" aria-labelledby="personal-details-heading">
+            <div className="fingerprint-section-heading"><div><h2 id="personal-details-heading">Personal details</h2><p>These details come from your signup profile.</p></div></div>
             <div className="fingerprint-company-grid fingerprint-personal-grid">
-              <div className="fingerprint-field"><label htmlFor="profileName">Full name</label><input id="profileName" value={profile.name || "Not available"} readOnly autoComplete="name" /></div>
-              <div className="fingerprint-field"><label htmlFor="profileEmail">Email address</label><input id="profileEmail" value={profile.email || "Not available"} readOnly autoComplete="email" /></div>
-              <div className="fingerprint-field"><label htmlFor="mobileNumber">Mobile number <span className="fingerprint-optional">Optional</span></label><div className="fingerprint-phone-control"><PhoneCountryPicker value={phoneCountry} onChange={setPhoneCountry} /><input id="mobileNumber" type="tel" autoComplete="tel-national" value={mobileNumber} onChange={(event) => setMobileNumber(event.target.value)} placeholder="Mobile number" /></div></div>
+              <div className="fingerprint-field"><FieldIconLabel htmlFor="profileName" icon={faUser}>Full name</FieldIconLabel><input id="profileName" value={profile.name || "Not available"} readOnly autoComplete="name" /></div>
+              <div className="fingerprint-field"><FieldIconLabel htmlFor="profileEmail" icon={faEnvelope}>Email address</FieldIconLabel><input id="profileEmail" value={profile.email || "Not available"} readOnly autoComplete="email" /></div>
+              <div className="fingerprint-field"><FieldIconLabel htmlFor="mobileNumber" icon={faPhone}>Mobile number <span className="fingerprint-optional">Optional</span></FieldIconLabel><div className="fingerprint-phone-control"><PhoneCountryPicker value={phoneCountry} onChange={setPhoneCountry} /><input id="mobileNumber" type="tel" autoComplete="tel-national" value={mobileNumber} onChange={(event) => setMobileNumber(event.target.value)} placeholder="Mobile number" /></div></div>
             </div>
           </section>
-        </div> : step === 2 ? <div className="fingerprint-fields">
           <section className="fingerprint-form-section" aria-labelledby="company-details-heading">
-            <div className="fingerprint-section-heading"><div><h3 id="company-details-heading">Company Details</h3><p>Tell us about your company and your role.</p></div></div>
+            <div className="fingerprint-section-heading"><div><h2 id="company-details-heading">Company details</h2><p>Share your company’s size, stage, location, and your role.</p></div></div>
             <div className="fingerprint-company-grid">
               <div className="fingerprint-field">
-                <label htmlFor="companyName">Company name <span className="fingerprint-required">*</span></label>
+                <FieldIconLabel htmlFor="companyName" icon={faBuilding}>Company name <span className="fingerprint-required">*</span></FieldIconLabel>
                 <input id="companyName" name="companyName" required autoComplete="organization" value={details.companyName} minLength={2} maxLength={100} aria-invalid={Boolean(errors.companyName)} aria-describedby={errors.companyName ? "companyName-error" : undefined} onChange={(event) => update("companyName", event.target.value)} placeholder="e.g. Acme Technologies" />
                 {errors.companyName && <span className="fingerprint-error" id="companyName-error">{errors.companyName}</span>}
               </div>
               <div className="fingerprint-field">
-                <label htmlFor="website">Company website <span className="fingerprint-optional">Optional</span></label>
+                <FieldIconLabel htmlFor="website" icon={faGlobe}>Company website <span className="fingerprint-optional">Optional</span></FieldIconLabel>
                 <input id="website" name="website" type="text" inputMode="url" autoComplete="url" value={details.website} aria-invalid={Boolean(errors.website)} aria-describedby={errors.website ? "website-error" : "website-hint"} onChange={(event) => update("website", event.target.value)} placeholder="https://companyname.com or companyname.com" />
                 {errors.website ? <span className="fingerprint-error" id="website-error">{errors.website}</span> : <span className="fingerprint-hint" id="website-hint">You can enter a full URL or a domain name.</span>}
               </div>
-              <SelectField id="industry" label="Industry" value={details.industry} options={industries} placeholder="Select an industry" error={errors.industry} onChange={(value) => update("industry", value)} />
+              <SelectField id="industry" label="Industry" icon={faLayerGroup} value={details.industry} options={industries} placeholder="Select an industry" error={errors.industry} onChange={(value) => update("industry", value)} />
             </div>
           </section>
 
@@ -326,10 +434,10 @@ export function BusinessFingerprintForm() {
 
           <section className="fingerprint-form-section" aria-label="Company details continued">
             <div className="fingerprint-snapshot-grid">
-              <SelectField id="teamSize" label="Team size" value={details.teamSize} options={teamSizes} placeholder="Select team size" error={errors.teamSize} onChange={(value) => update("teamSize", value)} />
-              <SelectField id="revenueRange" label="Annual revenue" value={details.revenueRange} options={revenueRanges} placeholder="Select revenue range" error={errors.revenueRange} onChange={(value) => update("revenueRange", value)} />
-              <SelectField id="companyStage" label="Company stage" value={details.companyStage} options={companyStages} placeholder="Select company stage" error={errors.companyStage} onChange={(value) => update("companyStage", value)} />
-              <SelectField id="role" label="Role" value={role} options={roles} placeholder="Select your role" onChange={setRole} />
+              <SelectField id="teamSize" label="Team size" icon={faUsers} value={details.teamSize} options={teamSizes} placeholder="Select team size" error={errors.teamSize} onChange={(value) => update("teamSize", value)} />
+              <SelectField id="revenueRange" label="Annual revenue" icon={faChartLine} value={details.revenueRange} options={revenueRanges} placeholder="Select revenue range" error={errors.revenueRange} onChange={(value) => update("revenueRange", value)} />
+              <SelectField id="companyStage" label="Company stage" icon={faFlag} value={details.companyStage} options={companyStages} placeholder="Select company stage" error={errors.companyStage} onChange={(value) => update("companyStage", value)} />
+              <SelectField id="role" label="Role" icon={faBriefcase} value={role} options={roles} placeholder="Select your role" onChange={setRole} />
             </div>
           </section>
           <LocationFields details={details} errors={errors} update={update} />
@@ -339,8 +447,12 @@ export function BusinessFingerprintForm() {
               <div className="fingerprint-problem-agent-mark" aria-hidden="true">S</div>
               <div><span className="fingerprint-section-kicker">STRATVEDA INTERVIEW</span><p>What decision or problem is taking up the most attention right now? Share what is happening, what you have tried, and what a useful outcome would look like.</p></div>
             </div>
+            <div className="fingerprint-problem-field-heading">
+              <h2 id="problem-statement-heading">Describe the problem you want help with</h2>
+              <p>Include what is happening, what you have tried, and the outcome you want.</p>
+            </div>
             <div className="fingerprint-field">
-              <label htmlFor="problemStatement" id="problem-statement-heading">Describe the problem you want help with</label>
+              <label htmlFor="problemStatement">Problem statement</label>
               <textarea id="problemStatement" rows={7} maxLength={3000} value={problemStatement} aria-invalid={Boolean(problemStatementError)} aria-describedby={problemStatementError ? "problemStatement-error" : "problemStatement-hint"} onChange={(event) => { setProblemStatement(event.target.value); setProblemStatementError(""); try { sessionStorage.setItem(problemStatementStorageKey, event.target.value); } catch { /* Keep editing if browser storage is unavailable. */ } }} placeholder="For example: We’re growing quickly, but our sales forecasts keep missing the mark. I’d like to understand what is driving the gap and where to focus first." />
               {problemStatementError ? <span className="fingerprint-error" id="problemStatement-error">{problemStatementError}</span> : <span className="fingerprint-hint" id="problemStatement-hint">Your statement stays in this browser tab until the interview agent is connected. {problemStatement.length}/3,000</span>}
             </div>
@@ -355,9 +467,9 @@ export function BusinessFingerprintForm() {
         <div className="fingerprint-form-footer">
           <p className={notice.startsWith("Check") ? "fingerprint-notice is-error" : "fingerprint-notice"} role="status" aria-live="polite">{notice}</p>
           <div className="fingerprint-form-actions">
-            {step === 2 && <button className="fingerprint-save-exit" type="button" onClick={() => void handleSaveAndExit()} disabled={isSaving}>{isSaving ? "Saving…" : "Save & Exit"}</button>}
-            {step > 1 && <button className="fingerprint-save-exit" type="button" onClick={() => { setStep(step === 3 ? 2 : 1); setNotice(""); }}>Back</button>}
-            <button className="fingerprint-continue" type="submit" disabled={isSaving}>{step === 2 && isSaving ? "Saving…" : <>Continue <span aria-hidden="true">→</span></>}</button>
+            {step === 1 && <button className="fingerprint-save-exit" type="button" onClick={() => void handleSaveAndExit()} disabled={isSaving}>{isSaving ? "Saving…" : "Save & Exit"}</button>}
+            {step > 1 && <button className="fingerprint-save-exit" type="button" onClick={() => { setStep(1); setNotice(""); }}>Back</button>}
+            <button className="fingerprint-continue" type="submit" disabled={isSaving}>{step === 1 && isSaving ? "Saving…" : <>Continue <span aria-hidden="true">→</span></>}</button>
           </div>
         </div>
       </form>

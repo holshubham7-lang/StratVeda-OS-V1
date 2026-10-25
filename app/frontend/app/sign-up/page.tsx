@@ -385,7 +385,7 @@ export default function SignUpPage() {
               <div className="signup-password-wrap">
                 <input id="signup-password" name="password" type={showPassword ? "text" : "password"} autoComplete="new-password" placeholder="At least 8 characters" minLength={8} required/>
                 <button className="signup-password-toggle" type="button" aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} onClick={() => setShowPassword((visible) => !visible)}>
-                  <FontAwesomeIcon icon={showPassword ? faEyeSlash : faEye} aria-hidden="true"/>
+                  <FontAwesomeIcon icon={showPassword ? faEye : faEyeSlash} aria-hidden="true"/>
                 </button>
               </div>
               <button className="signup-create-button" type="submit" disabled={busyProvider !== null}>{busyProvider === "password" ? "Creating account…" : <>Create account <span aria-hidden="true">→</span></>}</button>
