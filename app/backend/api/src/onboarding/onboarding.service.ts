@@ -5,6 +5,7 @@ import { CompanyDetails } from './company-details.schema';
 import { DecisionProfile } from './decision-profile.schema';
 import { EvidenceItem } from './evidence-item.schema';
 import { ExecutiveBrief } from './executive-brief.schema';
+import { ProblemInterview } from './problem-interview.schema';
 import { StrategicContext } from './strategic-context.schema';
 import { SaveCompanyDetailsDto } from './dto/save-company-details.dto';
 import { SaveDecisionProfileDto } from './dto/save-decision-profile.dto';
@@ -31,6 +32,7 @@ export class OnboardingService {
     @InjectModel(DecisionProfile.name) private readonly decisionProfiles: Model<DecisionProfile>,
     @InjectModel(EvidenceItem.name) private readonly evidenceItems: Model<EvidenceItem>,
     @InjectModel(ExecutiveBrief.name) private readonly executiveBriefs: Model<ExecutiveBrief>,
+    @InjectModel(ProblemInterview.name) private readonly problemInterviews: Model<ProblemInterview>,
   ) {}
 
   async getCompanyDetails(userId: string) {
@@ -127,18 +129,21 @@ export class OnboardingService {
 
   async getProgress(userId: string) {
     const owner = asObjectId(userId);
-    const [hasCompany, hasStrategicContext, hasDecisionProfile] = await Promise.all([
+    const [hasCompany, problemInterview, hasStrategicContext, hasDecisionProfile] = await Promise.all([
       this.companyDetails.exists({ userId: owner }),
+      this.problemInterviews.findOne({ userId: owner }).select('status').lean().exec(),
       this.strategicContexts.exists({ userId: owner }),
       this.decisionProfiles.exists({ userId: owner }),
     ]);
     const nextRoute = !hasCompany
-      ? '/welcome'
-      : !hasStrategicContext
-        ? '/strategic-context'
-        : !hasDecisionProfile
-          ? '/decision-profile'
-          : '/executive-brief';
+      ? '/business-fingerprint'
+      : problemInterview?.status !== 'complete'
+        ? '/business-fingerprint'
+        : !hasStrategicContext
+          ? '/strategic-context'
+          : !hasDecisionProfile
+            ? '/decision-profile'
+            : '/executive-brief';
     return { status: true, nextRoute };
   }
 }

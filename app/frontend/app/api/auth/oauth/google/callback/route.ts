@@ -2,8 +2,27 @@ import { NextRequest, NextResponse } from "next/server";
 
 const API_BASE = process.env.API_INTERNAL_URL ?? "http://localhost:3001/api";
 
-function signupRedirect(request: NextRequest, success = false, cookie?: string) {
-  const destination = new URL(success ? "/welcome" : "/sign-up", request.url);
+async function postSignupRoute(cookie?: string) {
+  const cookiePair = cookie?.split(";", 1)[0];
+  if (!cookiePair) return "/business-fingerprint";
+  try {
+    const response = await fetch(`${API_BASE}/onboarding/progress`, {
+      headers: { cookie: cookiePair },
+      cache: "no-store",
+    });
+    if (!response.ok) return "/business-fingerprint";
+    const result = await response.json() as { nextRoute?: unknown };
+    const route = result.nextRoute;
+    return typeof route === "string" && route.startsWith("/") && !route.startsWith("//")
+      ? route
+      : "/business-fingerprint";
+  } catch {
+    return "/business-fingerprint";
+  }
+}
+
+function signupRedirect(request: NextRequest, success = false, cookie?: string, nextRoute = "/business-fingerprint") {
+  const destination = new URL(success ? nextRoute : "/sign-up", request.url);
   if (!success) destination.searchParams.set("error", "oauth_failed");
   const response = NextResponse.redirect(destination, 303);
   if (success && cookie) response.headers.append("set-cookie", cookie);
@@ -39,7 +58,8 @@ export async function POST(request: NextRequest) {
 
     const result = await response.json() as { status?: boolean };
     if (result.status !== true) return signupRedirect(request);
-    return signupRedirect(request, true, response.headers.get("set-cookie") ?? undefined);
+    const cookie = response.headers.get("set-cookie") ?? undefined;
+    return signupRedirect(request, true, cookie, await postSignupRoute(cookie));
   } catch {
     return signupRedirect(request);
   }

@@ -269,39 +269,43 @@ export function BusinessFingerprintForm() {
         setProfile({ name: result.user.name ?? "", email: result.user.email ?? "" });
       })
       .catch(() => {});
-    fetch(`${API_BASE}/onboarding/problem-interview`, { credentials: "include", cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Your saved interview could not be loaded.");
-        return response.json();
-      })
-      .then((result) => {
-        if (!active || !result.data) return;
-        setInterview(result.data as InterviewState);
-        setProblemStatement((current) => current || result.data.messages?.find((message: InterviewMessage) => message.role === "user")?.content || "");
-      })
-      .catch((error) => { if (active) setNotice(error instanceof Error ? error.message : "Your saved interview could not be loaded."); });
     const draft = readDraft();
     try { setProblemStatement(sessionStorage.getItem(problemStatementStorageKey) ?? ""); } catch { /* Private browsing can disable session storage. */ }
     if (draft) {
       setDetails(draft);
       setNotice("Restored your unsaved answers from this browser.");
     }
-    fetch(`${API_BASE}/onboarding/business-details`, { credentials: "include", cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Saved company details could not be loaded.");
-        return response.json();
+    Promise.all([
+      fetch(`${API_BASE}/onboarding/business-details`, { credentials: "include", cache: "no-store" }),
+      fetch(`${API_BASE}/onboarding/problem-interview`, { credentials: "include", cache: "no-store" }),
+    ])
+      .then(async ([companyResponse, interviewResponse]) => {
+        if (!companyResponse.ok) throw new Error("Saved company details could not be loaded.");
+        if (!interviewResponse.ok) throw new Error("Your saved interview could not be loaded.");
+        return Promise.all([companyResponse.json(), interviewResponse.json()]);
       })
-      .then((result) => {
-        if (!active || !result.data || draft) return;
-        const saved = result.data as Partial<BusinessDetails> & { businessModels?: string[] };
-        setDetails({
-          companyName: saved.companyName ?? "", website: saved.website ?? "", industry: saved.industry ?? "",
-          businessModel: saved.businessModel ?? saved.businessModels?.[0] ?? "", teamSize: saved.teamSize ?? "",
-          revenueRange: saved.revenueRange ?? "", companyStage: saved.companyStage ?? "", country: saved.country ?? "",
-          state: saved.state ?? "", city: saved.city ?? "",
-        });
+      .then(([companyResult, interviewResult]) => {
+        if (!active) return;
+        const saved = companyResult.data as (Partial<BusinessDetails> & { businessModels?: string[] }) | null;
+        const savedInterview = interviewResult.data as InterviewState | null;
+        if (saved && !draft) {
+          setDetails({
+            companyName: saved.companyName ?? "", website: saved.website ?? "", industry: saved.industry ?? "",
+            businessModel: saved.businessModel ?? saved.businessModels?.[0] ?? "", teamSize: saved.teamSize ?? "",
+            revenueRange: saved.revenueRange ?? "", companyStage: saved.companyStage ?? "", country: saved.country ?? "",
+            state: saved.state ?? "", city: saved.city ?? "",
+          });
+        }
+        if (savedInterview) {
+          setInterview(savedInterview);
+          setProblemStatement((current) => current || savedInterview.messages?.find((message) => message.role === "user")?.content || "");
+        }
+        // A saved company profile means step 1 is complete. Resume at the
+        // agent interview unless it was already completed; completed users
+        // opening this page intentionally can still review personal/company data.
+        setStep(saved && savedInterview?.status !== "complete" ? 2 : 1);
       })
-      .catch((error) => { if (active && !draft) setNotice(error instanceof Error ? error.message : "Saved details could not be loaded."); });
+      .catch((error) => { if (active && !draft) setNotice(error instanceof Error ? error.message : "Saved onboarding details could not be loaded."); });
     return () => { active = false; };
   }, []);
 
@@ -352,7 +356,7 @@ export function BusinessFingerprintForm() {
       if (!response.ok) throw new Error(Array.isArray(result.message) ? result.message.join(" ") : result.message ?? "Company details could not be saved.");
       localStorage.removeItem(draftStorageKey);
       localStorage.setItem("stratveda-onboarding-completed-step", "1");
-      localStorage.setItem("stratveda-onboarding-resume-route", "/strategic-context");
+      localStorage.setItem("stratveda-onboarding-resume-route", "/business-fingerprint");
       return true;
     } catch (error) {
       setNotice(`Check your details: ${error instanceof Error ? error.message : "Company details could not be saved."}`);
@@ -371,6 +375,8 @@ export function BusinessFingerprintForm() {
       return;
     }
     if (interview?.status === "complete") {
+      localStorage.setItem("stratveda-onboarding-completed-step", "2");
+      localStorage.setItem("stratveda-onboarding-resume-route", "/strategic-context");
       setFlashNotice({ kind: "success", title: "Discovery interview complete", message: "Your answers are saved. Continue setting up your priorities." });
       beginOnboardingTransition();
       router.push("/strategic-context");
