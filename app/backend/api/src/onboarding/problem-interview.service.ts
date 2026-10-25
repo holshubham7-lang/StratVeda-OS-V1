@@ -12,7 +12,7 @@ const INTERVIEW_GUIDANCE = [
   'When you have gathered enough information, finish with a concise recap and put the exact marker [[INTERVIEW_COMPLETE]] on its own final line.',
 ].join(' ');
 
-type AgentResult = { content: string; responseId: string; agentSessionId: string; complete: boolean };
+type AgentResult = { content: string; responseId: string; agentSessionId?: string; complete: boolean };
 
 @Injectable()
 export class ProblemInterviewService {
@@ -154,10 +154,11 @@ export class ProblemInterviewService {
     const complete = /^\s*\[\[INTERVIEW_COMPLETE\]\]\s*$/im.test(rawContent);
     const content = rawContent.replace(/^\s*\[\[INTERVIEW_COMPLETE\]\]\s*$/im, '').trim();
     const responseId = typeof payload.id === 'string' ? payload.id : '';
-    const sessionId = typeof payload.agent_session_id === 'string' ? payload.agent_session_id : agentSessionId ?? '';
-    if (!responseId || !sessionId) throw new ServiceUnavailableException('The discovery agent response did not include its conversation identifiers.');
+    // Prompt-agent responses may omit a hosted-session ID; previous_response_id still threads the conversation.
+    const sessionId = typeof payload.agent_session_id === 'string' ? payload.agent_session_id : agentSessionId;
+    if (!responseId) throw new ServiceUnavailableException('The discovery agent response did not include its response identifier.');
 
-    return { content, responseId, agentSessionId: sessionId, complete };
+    return { content, responseId, agentSessionId: sessionId || undefined, complete };
   }
 
   private async getAccessToken() {
