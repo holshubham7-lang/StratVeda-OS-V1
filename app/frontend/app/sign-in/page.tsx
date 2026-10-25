@@ -363,7 +363,7 @@ export default function SignInPage() {
               <div className="signup-password-wrap">
                 <input id="signin-password" name="password" type={showPassword ? "text" : "password"} autoComplete="current-password" placeholder="Enter your password" required/>
                 <button className="signup-password-toggle" type="button" aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} onClick={() => setShowPassword((visible) => !visible)}>
-                  <FontAwesomeIcon icon={showPassword ? faEyeSlash : faEye} aria-hidden="true"/>
+                  <FontAwesomeIcon icon={showPassword ? faEye : faEyeSlash} aria-hidden="true"/>
                 </button>
               </div>
               <button className="signup-create-button" type="submit">Sign in <span aria-hidden="true">→</span></button>
