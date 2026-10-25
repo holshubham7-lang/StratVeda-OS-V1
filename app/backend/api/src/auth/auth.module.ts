@@ -13,7 +13,9 @@ import { DecisionProfile, DecisionProfileSchema } from '../onboarding/decision-p
 import { EvidenceItem, EvidenceItemSchema } from '../onboarding/evidence-item.schema';
 import { StrategicContext, StrategicContextSchema } from '../onboarding/strategic-context.schema';
 import { ExecutiveBrief, ExecutiveBriefSchema } from '../onboarding/executive-brief.schema';
+import { ProblemInterview, ProblemInterviewSchema } from '../onboarding/problem-interview.schema';
 import { BriefAgentService } from '../onboarding/brief-agent.service';
+import { ProblemInterviewService } from '../onboarding/problem-interview.service';
 import { OnboardingController } from '../onboarding/onboarding.controller';
 import { OnboardingService } from '../onboarding/onboarding.service';
 
@@ -27,8 +29,9 @@ import { OnboardingService } from '../onboarding/onboarding.service';
     { name: DecisionProfile.name, schema: DecisionProfileSchema },
     { name: EvidenceItem.name, schema: EvidenceItemSchema },
     { name: ExecutiveBrief.name, schema: ExecutiveBriefSchema },
+    { name: ProblemInterview.name, schema: ProblemInterviewSchema },
   ])],
   controllers: [AuthController, ManualAuthController, OnboardingController],
-  providers: [AuthService, SocialTokenService, JwtAuthGuard, OnboardingService, BriefAgentService],
+  providers: [AuthService, SocialTokenService, JwtAuthGuard, OnboardingService, BriefAgentService, ProblemInterviewService],
 })
 export class AuthModule {}

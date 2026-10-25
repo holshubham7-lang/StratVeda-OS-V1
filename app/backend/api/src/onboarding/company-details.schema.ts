@@ -15,8 +15,8 @@ export class CompanyDetails {
   @Prop({ required: true, trim: true, maxlength: 100 })
   industry!: string;
 
-  @Prop({ required: true, trim: true, maxlength: 100 })
-  businessModel!: string;
+  @Prop({ type: String, default: null, trim: true, maxlength: 100 })
+  businessModel?: string | null;
 
   @Prop({ required: true, trim: true, maxlength: 30 })
   teamSize!: string;

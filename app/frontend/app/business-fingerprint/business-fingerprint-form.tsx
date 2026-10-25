@@ -59,6 +59,8 @@ const draftStorageKey = "stratveda-business-fingerprint-draft";
 const problemStatementStorageKey = "stratveda-problem-statement-draft";
 
 type PersonalProfile = { name: string; email: string };
+type InterviewMessage = { role: 'user' | 'assistant'; content: string; createdAt?: string };
+type InterviewState = { status: 'active' | 'complete'; messages: InterviewMessage[] };
 
 function FieldIconLabel({ htmlFor, icon, children }: { htmlFor: string; icon: IconDefinition; children: ReactNode }) {
   return (
@@ -249,10 +251,13 @@ export function BusinessFingerprintForm() {
   const [role, setRole] = useState("");
   const [problemStatement, setProblemStatement] = useState("");
   const [problemStatementError, setProblemStatementError] = useState("");
+  const [interviewReply, setInterviewReply] = useState("");
+  const [interview, setInterview] = useState<InterviewState | null>(null);
   const [details, setDetails] = useState<BusinessDetails>(emptyDetails);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [isInterviewLoading, setIsInterviewLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -264,6 +269,17 @@ export function BusinessFingerprintForm() {
         setProfile({ name: result.user.name ?? "", email: result.user.email ?? "" });
       })
       .catch(() => {});
+    fetch(`${API_BASE}/onboarding/problem-interview`, { credentials: "include", cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Your saved interview could not be loaded.");
+        return response.json();
+      })
+      .then((result) => {
+        if (!active || !result.data) return;
+        setInterview(result.data as InterviewState);
+        setProblemStatement((current) => current || result.data.messages?.find((message: InterviewMessage) => message.role === "user")?.content || "");
+      })
+      .catch((error) => { if (active) setNotice(error instanceof Error ? error.message : "Your saved interview could not be loaded."); });
     const draft = readDraft();
     try { setProblemStatement(sessionStorage.getItem(problemStatementStorageKey) ?? ""); } catch { /* Private browsing can disable session storage. */ }
     if (draft) {
@@ -309,7 +325,6 @@ export function BusinessFingerprintForm() {
       } catch { next.website = "Enter a valid website URL, including https://."; }
     }
     if (!details.industry) next.industry = "Choose an industry.";
-    // The API still requires businessModel. It is hidden until the backend contract is updated.
     if (!details.teamSize) next.teamSize = "Choose a team size.";
     if (!details.revenueRange) next.revenueRange = "Choose a revenue range.";
     if (!details.companyStage) next.companyStage = "Choose a company stage.";
@@ -355,14 +370,42 @@ export function BusinessFingerprintForm() {
       setNotice("");
       return;
     }
-    if (problemStatement.trim().length < 10) {
+    if (interview?.status === "complete") {
+      setFlashNotice({ kind: "success", title: "Discovery interview complete", message: "Your answers are saved. Continue setting up your priorities." });
+      beginOnboardingTransition();
+      router.push("/strategic-context");
+      return;
+    }
+
+    const isStarting = !interview;
+    const message = isStarting ? problemStatement.trim() : interviewReply.trim();
+    if (isStarting && message.length < 10) {
       setProblemStatementError("Add a little more detail so the interview can focus on the right problem.");
       return;
     }
-    try { sessionStorage.setItem(problemStatementStorageKey, problemStatement.trim()); } catch { /* Continue if browser storage is unavailable. */ }
-    setFlashNotice({ kind: "success", title: "Problem statement saved", message: "Continue setting up your priorities. Your interview agent can use this statement when it is connected." });
-    beginOnboardingTransition();
-    router.push("/strategic-context");
+    if (!isStarting && !message) return;
+
+    setIsInterviewLoading(true);
+    setNotice("");
+    try {
+      const response = await fetch(`${API_BASE}/onboarding/problem-interview/${isStarting ? "start" : "message"}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(isStarting ? { problemStatement: message, role } : { message }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(Array.isArray(result.message) ? result.message.join(" ") : result.message ?? "The discovery interview could not be reached.");
+      setInterview(result.data as InterviewState);
+      setInterviewReply("");
+      if (isStarting) {
+        try { sessionStorage.setItem(problemStatementStorageKey, message); } catch { /* The API has saved the interview. */ }
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "The discovery interview could not be reached. Please try again.");
+    } finally {
+      setIsInterviewLoading(false);
+    }
   };
 
   const handleSaveAndExit = async () => {
@@ -447,20 +490,33 @@ export function BusinessFingerprintForm() {
               <div className="fingerprint-problem-agent-mark" aria-hidden="true">S</div>
               <div><span className="fingerprint-section-kicker">STRATVEDA INTERVIEW</span><p>What decision or problem is taking up the most attention right now? Share what is happening, what you have tried, and what a useful outcome would look like.</p></div>
             </div>
-            <div className="fingerprint-problem-field-heading">
-              <h2 id="problem-statement-heading">Describe the problem you want help with</h2>
-              <p>Include what is happening, what you have tried, and the outcome you want.</p>
-            </div>
-            <div className="fingerprint-field">
-              <label htmlFor="problemStatement">Problem statement</label>
-              <textarea id="problemStatement" rows={7} maxLength={3000} value={problemStatement} aria-invalid={Boolean(problemStatementError)} aria-describedby={problemStatementError ? "problemStatement-error" : "problemStatement-hint"} onChange={(event) => { setProblemStatement(event.target.value); setProblemStatementError(""); try { sessionStorage.setItem(problemStatementStorageKey, event.target.value); } catch { /* Keep editing if browser storage is unavailable. */ } }} placeholder="For example: We’re growing quickly, but our sales forecasts keep missing the mark. I’d like to understand what is driving the gap and where to focus first." />
-              {problemStatementError ? <span className="fingerprint-error" id="problemStatement-error">{problemStatementError}</span> : <span className="fingerprint-hint" id="problemStatement-hint">Your statement stays in this browser tab until the interview agent is connected. {problemStatement.length}/3,000</span>}
-            </div>
-            <div className="fingerprint-interview-ready" aria-live="polite">
-              <span className="fingerprint-interview-ready-icon" aria-hidden="true">AI</span>
-              <div><strong>Tailored follow-up questions</strong><p>The interview agent will decide how many questions to ask based on your company details and problem statement. This space is ready for that conversation.</p></div>
-              <span className="fingerprint-interview-status">Agent connection pending</span>
-            </div>
+            {!interview ? <>
+              <div className="fingerprint-problem-field-heading">
+                <h2 id="problem-statement-heading">Describe the problem you want help with</h2>
+                <p>Include what is happening, what you have tried, and the outcome you want.</p>
+              </div>
+              <div className="fingerprint-field">
+                <label htmlFor="problemStatement">Problem statement</label>
+                <textarea id="problemStatement" rows={7} maxLength={3000} disabled={isInterviewLoading} value={problemStatement} aria-invalid={Boolean(problemStatementError)} aria-describedby={problemStatementError ? "problemStatement-error" : "problemStatement-hint"} onChange={(event) => { setProblemStatement(event.target.value); setProblemStatementError(""); try { sessionStorage.setItem(problemStatementStorageKey, event.target.value); } catch { /* Keep editing if browser storage is unavailable. */ } }} placeholder="For example: We’re growing quickly, but our sales forecasts keep missing the mark. I’d like to understand what is driving the gap and where to focus first." />
+                {problemStatementError ? <span className="fingerprint-error" id="problemStatement-error">{problemStatementError}</span> : <span className="fingerprint-hint" id="problemStatement-hint">Your statement and interview answers are saved to your account. {problemStatement.length}/3,000</span>}
+              </div>
+            </> : <>
+              <div className="fingerprint-interview-thread" aria-live="polite" aria-label="Discovery interview">
+                {interview.messages.map((message, index) => <article className={`fingerprint-interview-message is-${message.role}`} key={`${message.createdAt ?? "turn"}-${index}`}>
+                  <span>{message.role === "assistant" ? "Discovery agent" : "You"}</span>
+                  <p>{message.content}</p>
+                </article>)}
+                {isInterviewLoading && <p className="fingerprint-interview-thinking" role="status">The discovery agent is thinking…</p>}
+              </div>
+              {interview.status === "active" && <div className="fingerprint-field">
+                <label htmlFor="interviewReply">Your answer</label>
+                <textarea id="interviewReply" rows={4} maxLength={4000} disabled={isInterviewLoading} value={interviewReply} onChange={(event) => setInterviewReply(event.target.value)} placeholder="Share any details that will help the agent understand your situation." />
+              </div>}
+              {interview.status === "complete" && <div className="fingerprint-interview-ready" role="status">
+                <span className="fingerprint-interview-ready-icon" aria-hidden="true">✓</span>
+                <div><strong>Interview complete</strong><p>Your problem statement and answers are saved. Continue to the next setup step.</p></div>
+              </div>}
+            </>}
           </section>
         </div>}
 
@@ -469,7 +525,7 @@ export function BusinessFingerprintForm() {
           <div className="fingerprint-form-actions">
             {step === 1 && <button className="fingerprint-save-exit" type="button" onClick={() => void handleSaveAndExit()} disabled={isSaving}>{isSaving ? "Saving…" : "Save & Exit"}</button>}
             {step > 1 && <button className="fingerprint-save-exit" type="button" onClick={() => { setStep(1); setNotice(""); }}>Back</button>}
-            <button className="fingerprint-continue" type="submit" disabled={isSaving}>{step === 1 && isSaving ? "Saving…" : <>Continue <span aria-hidden="true">→</span></>}</button>
+            <button className="fingerprint-continue" type="submit" disabled={isSaving || isInterviewLoading || (step === 2 && interview?.status === "active" && !interviewReply.trim())}>{step === 1 && isSaving ? "Saving…" : isInterviewLoading ? "Connecting…" : step === 2 && interview?.status === "active" ? <>Send answer <span aria-hidden="true">→</span></> : step === 2 && interview?.status === "complete" ? <>Continue setup <span aria-hidden="true">→</span></> : step === 2 ? <>Start interview <span aria-hidden="true">→</span></> : <>Continue <span aria-hidden="true">→</span></>}</button>
           </div>
         </div>
       </form>

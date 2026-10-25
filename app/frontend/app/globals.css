@@ -720,6 +720,12 @@ html.motion-ready .question-card:nth-child(4).is-visible { animation-delay: 210m
 .fingerprint-problem-step .fingerprint-field textarea { width: 100%; min-height: 170px; resize: vertical; padding: 14px 15px; border: 1px solid #dce5de; border-radius: 10px; outline: none; color: #27382d; background: #fff; font: inherit; font-size: 13px; line-height: 1.65; }
 .fingerprint-problem-step .fingerprint-field textarea:focus { border-color: #72a182; box-shadow: 0 0 0 3px rgba(55,123,89,.12); }
 .fingerprint-problem-step .fingerprint-field textarea[aria-invalid=true] { border-color: #c9705d; }
+.fingerprint-interview-thread { display: grid; gap: 12px; width: 100%; max-height: 420px; overflow-y: auto; padding: 4px 3px; scroll-behavior: smooth; }
+.fingerprint-interview-message { width: min(88%, 680px); padding: 13px 15px; border: 1px solid #dfe9e1; border-radius: 4px 13px 13px; background: #f8fbf8; }
+.fingerprint-interview-message.is-user { justify-self: end; border-color: #d5e6da; border-radius: 13px 4px 13px 13px; background: #eef6f0; }
+.fingerprint-interview-message span { color: #547662; font-size: 10px; font-weight: 750; letter-spacing: .04em; }
+.fingerprint-interview-message p { margin: 7px 0 0; color: #34483a; font-size: 13px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fingerprint-interview-thinking { margin: 0; padding: 5px 2px; color: #728178; font-size: 12px; }
 .fingerprint-interview-ready { display: grid; grid-template-columns: 30px minmax(0,1fr) auto; align-items: start; gap: 12px; padding: 16px; border: 1px dashed #cbded0; border-radius: 11px; background: #f8fbf8; }
 .fingerprint-interview-ready-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; color: #4f805e; background: #eaf4ec; }
 .fingerprint-interview-ready strong { color: #385542; font-size: 12px; }

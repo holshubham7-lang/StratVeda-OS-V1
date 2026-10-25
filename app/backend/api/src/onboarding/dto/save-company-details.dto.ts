@@ -26,8 +26,10 @@ export class SaveCompanyDetailsDto {
   @IsIn(industries)
   industry!: string;
 
+  @Transform(({ value }) => value === '' ? undefined : value)
+  @IsOptional()
   @IsIn(businessModels)
-  businessModel!: string;
+  businessModel?: string;
 
   @IsIn(teamSizes)
   teamSize!: string;

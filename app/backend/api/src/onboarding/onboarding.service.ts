@@ -41,7 +41,7 @@ export class OnboardingService {
   async saveCompanyDetails(userId: string, details: SaveCompanyDetailsDto) {
     await this.companyDetails.findOneAndUpdate(
       { userId: asObjectId(userId) },
-      { $set: { ...details }, $setOnInsert: { userId: asObjectId(userId) } },
+      { $set: { ...details, businessModel: details.businessModel ?? null }, $setOnInsert: { userId: asObjectId(userId) } },
       { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
     );
     return { status: true, message: 'Company details saved successfully' };
