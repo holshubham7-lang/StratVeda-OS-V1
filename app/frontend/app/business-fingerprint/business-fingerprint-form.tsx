@@ -60,7 +60,7 @@ const problemStatementStorageKey = "stratveda-problem-statement-draft";
 
 type PersonalProfile = { name: string; email: string };
 type InterviewMessage = { role: 'user' | 'assistant'; content: string; createdAt?: string };
-type InterviewState = { status: 'active' | 'complete'; messages: InterviewMessage[] };
+type InterviewState = { status: 'pending' | 'active' | 'complete'; messages: InterviewMessage[]; pendingMessage?: string; canRetry?: boolean };
 
 function FieldIconLabel({ htmlFor, icon, children }: { htmlFor: string; icon: IconDefinition; children: ReactNode }) {
   return (
@@ -298,6 +298,7 @@ export function BusinessFingerprintForm() {
         }
         if (savedInterview) {
           setInterview(savedInterview);
+          setInterviewReply(savedInterview.pendingMessage ?? "");
           setProblemStatement((current) => current || savedInterview.messages?.find((message) => message.role === "user")?.content || "");
         }
         // A saved company profile means step 1 is complete. Resume at the
@@ -383,7 +384,7 @@ export function BusinessFingerprintForm() {
       return;
     }
 
-    const isStarting = !interview;
+    const isStarting = !interview || (interview.status === "pending" && interview.canRetry === true);
     const message = isStarting ? problemStatement.trim() : interviewReply.trim();
     if (isStarting && message.length < 10) {
       setProblemStatementError("Add a little more detail so the interview can focus on the right problem.");
@@ -514,8 +515,12 @@ export function BusinessFingerprintForm() {
                 </article>)}
                 {isInterviewLoading && <p className="fingerprint-interview-thinking" role="status">The discovery agent is thinking…</p>}
               </div>
-              {interview.status === "active" && <div className="fingerprint-field">
-                <label htmlFor="interviewReply">Your answer</label>
+              {interview.status === "pending" && <div className="fingerprint-interview-ready" role="status">
+                <span className="fingerprint-interview-ready-icon" aria-hidden="true">…</span>
+                <div><strong>Your input is saved</strong><p>The agent request did not finish. Retry to continue; the saved statement and answers will remain in your account.</p></div>
+              </div>}
+              {(interview.status === "active" || (interview.status === "pending" && interview.canRetry !== true)) && <div className="fingerprint-field">
+                <label htmlFor="interviewReply">{interview.status === "pending" ? "Saved answer (edit before retrying)" : "Your answer"}</label>
                 <textarea id="interviewReply" rows={4} maxLength={4000} disabled={isInterviewLoading} value={interviewReply} onChange={(event) => setInterviewReply(event.target.value)} placeholder="Share any details that will help the agent understand your situation." />
               </div>}
               {interview.status === "complete" && <div className="fingerprint-interview-ready" role="status">
@@ -531,7 +536,7 @@ export function BusinessFingerprintForm() {
           <div className="fingerprint-form-actions">
             {step === 1 && <button className="fingerprint-save-exit" type="button" onClick={() => void handleSaveAndExit()} disabled={isSaving}>{isSaving ? "Saving…" : "Save & Exit"}</button>}
             {step > 1 && <button className="fingerprint-save-exit" type="button" onClick={() => { setStep(1); setNotice(""); }}>Back</button>}
-            <button className="fingerprint-continue" type="submit" disabled={isSaving || isInterviewLoading || (step === 2 && interview?.status === "active" && !interviewReply.trim())}>{step === 1 && isSaving ? "Saving…" : isInterviewLoading ? "Connecting…" : step === 2 && interview?.status === "active" ? <>Send answer <span aria-hidden="true">→</span></> : step === 2 && interview?.status === "complete" ? <>Continue setup <span aria-hidden="true">→</span></> : step === 2 ? <>Start interview <span aria-hidden="true">→</span></> : <>Continue <span aria-hidden="true">→</span></>}</button>
+            <button className="fingerprint-continue" type="submit" disabled={isSaving || isInterviewLoading || Boolean(step === 2 && interview && (interview.status === "active" || (interview.status === "pending" && interview.canRetry !== true)) && !interviewReply.trim())}>{step === 1 && isSaving ? "Saving…" : isInterviewLoading ? "Connecting…" : step === 2 && interview?.status === "pending" && interview.canRetry ? <>Retry interview <span aria-hidden="true">→</span></> : step === 2 && interview?.status === "pending" ? <>Retry answer <span aria-hidden="true">→</span></> : step === 2 && interview?.status === "active" ? <>Send answer <span aria-hidden="true">→</span></> : step === 2 && interview?.status === "complete" ? <>Continue setup <span aria-hidden="true">→</span></> : step === 2 ? <>Start interview <span aria-hidden="true">→</span></> : <>Continue <span aria-hidden="true">→</span></>}</button>
           </div>
         </div>
       </form>

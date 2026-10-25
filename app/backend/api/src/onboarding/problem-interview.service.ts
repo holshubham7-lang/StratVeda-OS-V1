@@ -53,26 +53,30 @@ export class ProblemInterviewService {
       `Interview guidance: ${INTERVIEW_GUIDANCE}`,
     ].join('\n\n');
 
-    const result = await this.invoke(input);
-    const messages: ProblemInterviewMessage[] = [
-      { role: 'user', content: problemStatement, createdAt: new Date() },
-      { role: 'assistant', content: result.content, createdAt: new Date() },
-    ];
-    await this.interviews.findOneAndUpdate(
+    const interview = await this.interviews.findOneAndUpdate(
       { userId: owner },
       {
         $set: {
           problemStatement,
-          status: result.complete ? 'complete' : 'active',
-          responseId: result.responseId,
-          agentSessionId: result.agentSessionId,
-          messages,
+          status: 'pending',
+          pendingMessage: problemStatement,
+          messages: [{ role: 'user', content: problemStatement, createdAt: new Date() }],
         },
         $setOnInsert: { userId: owner },
+        $unset: { responseId: 1, agentSessionId: 1 },
       },
       { upsert: true, new: true, runValidators: true },
     );
-    return { status: true, data: { status: result.complete ? 'complete' : 'active', messages } };
+    // Persist the problem statement before calling Foundry so the user's input
+    // survives a timeout, provider outage, or a later sign-in.
+    const result = await this.invoke(input);
+    interview.messages.push({ role: 'assistant', content: result.content, createdAt: new Date() } as ProblemInterviewMessage);
+    interview.status = result.complete ? 'complete' : 'active';
+    interview.responseId = result.responseId;
+    interview.agentSessionId = result.agentSessionId;
+    interview.pendingMessage = undefined;
+    await interview.save();
+    return { status: true, data: this.toClient(interview.toObject()) };
   }
 
   async reply(userId: string, message: string) {
@@ -80,15 +84,29 @@ export class ProblemInterviewService {
     const interview = await this.interviews.findOne({ userId: owner }).exec();
     if (!interview) throw new NotFoundException('Start the discovery interview before sending an answer.');
     if (interview.status === 'complete') throw new BadRequestException('This interview is complete. Continue to the next setup step.');
+    if (interview.status === 'pending' && !interview.responseId) {
+      return this.start(userId, interview.problemStatement);
+    }
+
+    const lastMessage = interview.messages.at(-1);
+    if (interview.status === 'pending' && interview.pendingMessage && lastMessage?.role === 'user') {
+      // A previous agent request failed. Keep one durable copy of the answer
+      // while allowing the user to retry or revise it.
+      lastMessage.content = message;
+      lastMessage.createdAt = new Date();
+    } else {
+      interview.messages.push({ role: 'user', content: message, createdAt: new Date() } as ProblemInterviewMessage);
+    }
+    interview.pendingMessage = message;
+    interview.status = 'pending';
+    await interview.save();
 
     const result = await this.invoke(message, interview.responseId, interview.agentSessionId);
-    interview.messages.push(
-      { role: 'user', content: message, createdAt: new Date() } as ProblemInterviewMessage,
-      { role: 'assistant', content: result.content, createdAt: new Date() } as ProblemInterviewMessage,
-    );
+    interview.messages.push({ role: 'assistant', content: result.content, createdAt: new Date() } as ProblemInterviewMessage);
     interview.responseId = result.responseId;
     interview.agentSessionId = result.agentSessionId;
     interview.status = result.complete ? 'complete' : 'active';
+    interview.pendingMessage = undefined;
     await interview.save();
     return { status: true, data: this.toClient(interview.toObject()) };
   }
@@ -96,6 +114,8 @@ export class ProblemInterviewService {
   private toClient(interview: Pick<ProblemInterview, 'status' | 'messages'>) {
     return {
       status: interview.status,
+      pendingMessage: 'pendingMessage' in interview ? interview.pendingMessage : undefined,
+      canRetry: interview.status === 'pending' && !('responseId' in interview && interview.responseId),
       messages: interview.messages.map(({ role, content, createdAt }) => ({ role, content, createdAt })),
     };
   }

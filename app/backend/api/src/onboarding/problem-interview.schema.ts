@@ -23,14 +23,17 @@ export class ProblemInterview {
   @Prop({ required: true, trim: true, maxlength: 3000 })
   problemStatement!: string;
 
-  @Prop({ required: true, enum: ['active', 'complete'], default: 'active' })
-  status!: 'active' | 'complete';
+  @Prop({ required: true, enum: ['pending', 'active', 'complete'], default: 'pending' })
+  status!: 'pending' | 'active' | 'complete';
 
-  @Prop({ required: true, trim: true })
-  responseId!: string;
+  @Prop({ trim: true })
+  responseId?: string;
 
-  @Prop({ required: true, trim: true })
-  agentSessionId!: string;
+  @Prop({ trim: true })
+  agentSessionId?: string;
+
+  @Prop({ trim: true, maxlength: 4000 })
+  pendingMessage?: string;
 
   @Prop({ type: [ProblemInterviewMessageSchema], default: [] })
   messages!: ProblemInterviewMessage[];
