@@ -347,11 +347,13 @@ export function BusinessFingerprintForm() {
     setIsSaving(true);
     setNotice("");
     try {
+      const companyDetailsPayload = { ...details };
+      Reflect.deleteProperty(companyDetailsPayload, "businessModel");
       const response = await fetch(`${API_BASE}/onboarding/business-details`, {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...details, website: normalizedWebsite(details.website), companyName: details.companyName.trim(), country: details.country.trim() }),
+        body: JSON.stringify({ ...companyDetailsPayload, website: normalizedWebsite(details.website), companyName: details.companyName.trim(), country: details.country.trim() }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(Array.isArray(result.message) ? result.message.join(" ") : result.message ?? "Company details could not be saved.");
