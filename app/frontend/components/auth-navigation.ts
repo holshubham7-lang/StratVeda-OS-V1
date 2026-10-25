@@ -13,5 +13,5 @@ export async function getPostLoginRoute(): Promise<string> {
   } catch {
     // The welcome page performs its own server-session check after navigation.
   }
-  return "/welcome";
+  return "/business-fingerprint";
 }

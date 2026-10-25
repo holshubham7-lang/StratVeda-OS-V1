@@ -8,8 +8,10 @@ import { SaveCompanyDetailsDto } from './dto/save-company-details.dto';
 import { SaveDecisionProfileDto } from './dto/save-decision-profile.dto';
 import { SaveEvidenceLibraryDto } from './dto/save-evidence-library.dto';
 import { SaveExecutiveBriefDto } from './dto/save-executive-brief.dto';
+import { ReplyToProblemInterviewDto, StartProblemInterviewDto } from './dto/problem-interview.dto';
 import { SaveStrategicContextDto } from './dto/save-strategic-context.dto';
 import { OnboardingService } from './onboarding.service';
+import { ProblemInterviewService } from './problem-interview.service';
 
 @Controller('onboarding')
 @UseGuards(JwtAuthGuard)
@@ -18,6 +20,7 @@ export class OnboardingController {
     private readonly onboarding: OnboardingService,
     private readonly config: ConfigService,
     private readonly briefAgent: BriefAgentService,
+    private readonly problemInterview: ProblemInterviewService,
   ) {}
 
   private assertTrustedOrigin(origin?: string) {
@@ -39,6 +42,33 @@ export class OnboardingController {
   ) {
     this.assertTrustedOrigin(origin);
     return this.onboarding.saveCompanyDetails(request.auth!.sub, body);
+  }
+
+  @Get('problem-interview')
+  getProblemInterview(@Req() request: AuthenticatedRequest) {
+    return this.problemInterview.get(request.auth!.sub);
+  }
+
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Post('problem-interview/start')
+  startProblemInterview(
+    @Body() body: StartProblemInterviewDto,
+    @Req() request: AuthenticatedRequest,
+    @Headers('origin') origin: string | undefined,
+  ) {
+    this.assertTrustedOrigin(origin);
+    return this.problemInterview.start(request.auth!.sub, body.problemStatement, body.role);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('problem-interview/message')
+  replyToProblemInterview(
+    @Body() body: ReplyToProblemInterviewDto,
+    @Req() request: AuthenticatedRequest,
+    @Headers('origin') origin: string | undefined,
+  ) {
+    this.assertTrustedOrigin(origin);
+    return this.problemInterview.reply(request.auth!.sub, body.message);
   }
 
   @Get('strategic-context')
