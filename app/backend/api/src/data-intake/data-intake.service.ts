@@ -58,6 +58,10 @@ export class DataIntakeService {
     }
 
     const owner = new Types.ObjectId(userId);
+    const session = await this.sessions.findOne({ userId: owner }).select('status').lean().exec();
+    if (session?.status === 'processing') {
+      throw new BadRequestException('Your files are being handed over. Wait for it to finish before adding more.');
+    }
     const existing = await this.files.countDocuments({ userId: owner });
     if (existing + uploads.length > maxDataIntakeFiles) {
       throw new BadRequestException(`You can add up to ${maxDataIntakeFiles} data files in this stage.`);
@@ -66,14 +70,16 @@ export class DataIntakeService {
     const prepared = uploads.map(prepareUpload);
     for (const upload of prepared) await this.storeInQuarantine(owner, upload);
 
+    // Uploading only stages files; scanning and extraction run per file in the
+    // background, and the agent handover waits for an explicit complete().
     await this.sessions.findOneAndUpdate(
       { userId: owner },
       {
         $set: {
-          status: 'processing',
+          status: 'collecting',
           dataAgentStatus: 'pending',
           masterStatus: 'pending',
-          handoverRequested: true,
+          handoverRequested: false,
         },
         $unset: { error: 1, completedAt: 1, evidencePackageText: 1, masterResponse: 1 },
         $inc: { generation: 1 },
@@ -489,6 +495,7 @@ export class DataIntakeService {
       })),
       evidenceSummary: evidence ? this.evidenceSummary(evidence) : null,
       masterSummary: session?.masterResponse ? session.masterResponse.slice(0, 700) : null,
+      masterResponse: session?.masterResponse ?? null,
     };
   }
 
