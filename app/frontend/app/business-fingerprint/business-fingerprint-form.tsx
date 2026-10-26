@@ -476,10 +476,10 @@ export function BusinessFingerprintForm() {
     }
     if (interview?.status === "complete") {
       localStorage.setItem("stratveda-onboarding-completed-step", "2");
-      localStorage.setItem("stratveda-onboarding-resume-route", "/strategic-context");
-      setFlashNotice({ kind: "success", title: "Discovery interview complete", message: "Your answers are saved. Continue setting up your priorities." });
+      localStorage.setItem("stratveda-onboarding-resume-route", "/decision-workspace");
+      setFlashNotice({ kind: "success", title: "Setup complete", message: "Your business fingerprint is saved. Opening your decision workspace." });
       beginOnboardingTransition();
-      router.push("/strategic-context");
+      router.push("/decision-workspace");
       return;
     }
 
@@ -665,11 +665,11 @@ export function BusinessFingerprintForm() {
               <div className="interview-complete-card" role="status">
                 <span className="interview-complete-icon" aria-hidden="true">✓</span>
                 <strong>Interview complete</strong>
-                <p>Your problem statement and answers are saved. Continue to the next setup step to keep building your decision context.</p>
+                <p>Your problem statement and answers are saved. Open your decision workspace to start working with your business fingerprint.</p>
               </div>
               <div className="interview-composer-actions">
                 <span className="interview-composer-count">{interview.messages.length} saved {interview.messages.length === 1 ? "message" : "messages"}</span>
-                <button className="fingerprint-continue interview-send" type="submit" disabled={isSaving || isInterviewLoading}>{isInterviewLoading ? "Connecting…" : <>Continue setup <span aria-hidden="true">→</span></>}</button>
+                <button className="fingerprint-continue interview-send" type="submit" disabled={isSaving || isInterviewLoading}>{isInterviewLoading ? "Connecting…" : <>Open workspace <span aria-hidden="true">→</span></>}</button>
               </div>
             </> : interview.status === "pending" && interview.canRetry === true ? <>
               <div className="interview-composer-heading">
