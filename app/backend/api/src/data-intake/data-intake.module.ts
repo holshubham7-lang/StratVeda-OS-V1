@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { RevokedToken, RevokedTokenSchema } from '../auth/revoked-token.schema';
 import { CompanyDetails, CompanyDetailsSchema } from '../onboarding/company-details.schema';
 import { ProblemInterview, ProblemInterviewSchema } from '../onboarding/problem-interview.schema';
 import { AgentHandoffService } from './agent-handoff.service';
@@ -16,6 +17,7 @@ import { PromptShieldsService } from './prompt-shields.service';
   imports: [MongooseModule.forFeature([
     { name: DataIntakeFile.name, schema: DataIntakeFileSchema },
     { name: DataIntakeSession.name, schema: DataIntakeSessionSchema },
+    { name: RevokedToken.name, schema: RevokedTokenSchema },
     { name: CompanyDetails.name, schema: CompanyDetailsSchema },
     { name: ProblemInterview.name, schema: ProblemInterviewSchema },
   ])],

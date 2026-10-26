@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: deploy-backend-development
@@ -40,14 +41,27 @@ jobs:
         working-directory: app/backend/api
         run: npm prune --omit=dev
 
-      - name: Deploy API to Azure App Service
-        uses: azure/webapps-deploy@v3
+      - name: Sign in to Azure
+        uses: azure/login@v2
         with:
-          app-name: revops-api-dev
-          publish-profile: ${{ secrets.AZURE_API_PUBLISH_PROFILE }}
-          package: app/backend/api
-          clean: true
-          restart: true
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Package API
+        working-directory: app/backend/api
+        run: zip -r "$RUNNER_TEMP/api.zip" . -x '*.git*'
+
+      - name: Deploy API to Azure App Service
+        run: |
+          az webapp deploy \
+            --resource-group stratvedaos_group \
+            --name revops-api-dev \
+            --src-path "$RUNNER_TEMP/api.zip" \
+            --type zip \
+            --clean true \
+            --restart true \
+            --track-status true
 
       - name: Verify API health
         shell: bash
