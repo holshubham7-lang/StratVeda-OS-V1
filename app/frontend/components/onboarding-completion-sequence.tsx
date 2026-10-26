@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Icon } from "./icon";
 
-const savedSteps = [
+const defaultSteps = [
   "UNDERSTAND YOUR BUSINESS",
   "WHAT MATTERS MOST RIGHT NOW?",
   "WHERE DO YOU NEED BETTER DECISIONS?",
@@ -16,9 +16,11 @@ export type CompletionStatus = "running" | "ready" | "failed";
 /**
  * The step ticks are animation, but completion is not: this waits for the real
  * agent call in `status` before handing off, so nobody is redirected to an empty
- * Decision Center.
+ * Decision Center. It also lets every step tick before handing off, so a status
+ * that is already "ready" still shows the whole sequence.
  */
-export function OnboardingCompletionSequence({ status, onComplete }: { status: CompletionStatus; onComplete: () => void }) {
+export function OnboardingCompletionSequence({ status, onComplete, steps = defaultSteps }: { status: CompletionStatus; onComplete: () => void; steps?: string[] }) {
+  const savedSteps = steps;
   const [completedSteps, setCompletedSteps] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
@@ -34,16 +36,16 @@ export function OnboardingCompletionSequence({ status, onComplete }: { status: C
     timers.push(setTimeout(() => setIsGenerating(true), stepDelay * savedSteps.length + 180));
 
     return () => timers.forEach(clearTimeout);
-  }, []);
+  }, [savedSteps]);
 
   useEffect(() => {
-    if (status === "running") return;
+    if (status === "running" || !isGenerating) return;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const finishDelay = status === "ready" ? (reduceMotion ? 150 : 320) : 600;
     setIsComplete(status === "ready");
     const timer = setTimeout(onComplete, finishDelay);
     return () => clearTimeout(timer);
-  }, [status, onComplete]);
+  }, [status, isGenerating, onComplete]);
 
   const progress = status === "running" ? (isGenerating ? 88 : Math.round((completedSteps / savedSteps.length) * 78)) : 100;
 

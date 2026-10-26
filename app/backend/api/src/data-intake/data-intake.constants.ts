@@ -16,7 +16,9 @@ export const dataIntakeFileStatuses = [
 
 export type DataIntakeFileStatus = typeof dataIntakeFileStatuses[number];
 
-export const dataIntakeSessionStatuses = ['processing', 'ready', 'failed', 'skipped'] as const;
+// 'collecting' holds uploaded files until the user asks for the handover, so
+// files can be added one at a time or several at once.
+export const dataIntakeSessionStatuses = ['collecting', 'processing', 'ready', 'failed', 'skipped'] as const;
 export type DataIntakeSessionStatus = typeof dataIntakeSessionStatuses[number];
 
 export const dataIntakeAgentStatuses = ['pending', 'running', 'completed', 'failed'] as const;

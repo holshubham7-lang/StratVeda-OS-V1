@@ -1,6 +1,6 @@
 "use client";
 
-import { DragEvent, useEffect, useRef, useState } from "react";
+import { DragEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import gsap from "gsap";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -12,7 +12,7 @@ import {
   faTriangleExclamation,
   faXmark,
 } from "@fortawesome/free-solid-svg-icons";
-import { beginOnboardingTransition } from "../../components/onboarding-route-transition";
+import { OnboardingCompletionSequence } from "../../components/onboarding-completion-sequence";
 import styles from "./data-intake.module.css";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001/api";
@@ -21,6 +21,7 @@ const MAX_BYTES = 25 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set(["pdf", "docx", "xlsx", "csv", "json", "txt", "png", "jpg", "jpeg"]);
 const FORMAT_LABELS = ["PDF", "DOCX", "XLSX", "CSV", "JSON", "TXT", "PNG", "JPG"];
 const TERMINAL_FILE_STATES = new Set(["ready", "blocked", "failed"]);
+const completionSteps = ["PERSONAL & COMPANY DETAILS", "DISCOVERY INTERVIEW", "COMPANY DATA", "MASTER AGENT HANDOVER"];
 
 type IntakeFile = {
   id: string;
@@ -50,9 +51,10 @@ type IntakeData = {
   files: IntakeFile[];
   evidenceSummary: EvidenceSummary | null;
   masterSummary: string | null;
+  masterResponse: string | null;
 };
 
-type StageKey = "upload" | "scan" | "extract" | "format" | "done" | "error";
+type StageKey = "upload" | "scan" | "extract" | "staged" | "format" | "done" | "error";
 
 const stageOrder: StageKey[] = ["upload", "scan", "extract", "format", "done"];
 
@@ -148,17 +150,19 @@ function stageFor(data: IntakeData | null, uploadProgress: number | null): Stage
   if (statuses.some((status) => status === "quarantined" || status === "scanning")) return "scan";
   if (statuses.some((status) => status === "clean" || status === "extracting")) return "extract";
   if (statuses.length === 0) return data.sessionStatus === "processing" ? "format" : "upload";
-  return "format";
+  // Files are scanned and read, but nothing is handed over until the user asks.
+  return data.sessionStatus === "processing" ? "format" : "staged";
 }
 
 function stageIndex(stage: StageKey) {
-  return stage === "error" ? stageOrder.indexOf("format") : stageOrder.indexOf(stage);
+  return stage === "error" || stage === "staged" ? stageOrder.indexOf("format") : stageOrder.indexOf(stage);
 }
 
 function stagePercent(stage: StageKey, uploadProgress: number | null) {
   if (stage === "upload") return Math.max(6, uploadProgress ?? 6);
   if (stage === "scan") return 32;
   if (stage === "extract") return 57;
+  if (stage === "staged") return 70;
   if (stage === "format") return 82;
   if (stage === "done") return 100;
   return 82;
@@ -168,6 +172,7 @@ function annotationFor(stage: StageKey) {
   if (stage === "upload") return "Uploading to quarantine";
   if (stage === "scan") return "Waiting for Defender";
   if (stage === "extract") return "Reading approved files";
+  if (stage === "staged") return "Ready to hand over";
   if (stage === "format") return "Building evidence package";
   if (stage === "done") return "Handover complete";
   return "Needs attention";
@@ -196,6 +201,7 @@ export function DataIntakeClient() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [isOpeningCenter, setIsOpeningCenter] = useState(false);
 
   async function refresh(silent = false) {
     if (busyRef.current) return;
@@ -244,7 +250,9 @@ export function DataIntakeClient() {
   const failed = data?.sessionStatus === "failed";
   const done = data?.sessionStatus === "ready" || data?.sessionStatus === "skipped";
   const blockedFiles = data?.files.filter((file) => file.status === "blocked" || file.status === "failed") ?? [];
-  const noticeIsError = Boolean(notice && !notice.startsWith("Upload complete") && !notice.startsWith("Pipeline restarted") && !notice.startsWith("File removed"));
+  const filesSettling = data?.files.some((file) => !TERMINAL_FILE_STATES.has(file.status)) ?? false;
+  const canAddFiles = !processing && !busy && existingCount + selected.length < MAX_FILES;
+  const noticeIsError = Boolean(notice && !notice.startsWith("Upload complete") && !notice.startsWith("Handover started") && !notice.startsWith("Pipeline restarted") && !notice.startsWith("File removed"));
 
   function addFiles(incoming: File[]) {
     if (!incoming.length) return;
@@ -298,7 +306,7 @@ export function DataIntakeClient() {
       setData(next);
       setSelected([]);
       setUploadProgress(100);
-      setNotice("Upload complete. Defender is checking the files before anything is read.");
+      setNotice(`Upload complete. Defender is checking the files before anything is read. ${existingCount + selected.length < MAX_FILES ? "Add more files or hand them over when you are ready." : "Hand them over when you are ready."}`);
       window.setTimeout(() => setUploadProgress(null), 550);
     } catch (error) {
       setUploadProgress(null);
@@ -327,8 +335,9 @@ export function DataIntakeClient() {
     setBusy(true);
     setNotice("");
     try {
+      const wasFailed = failed;
       setData(await postIntake("complete"));
-      setNotice("Pipeline restarted. We will keep this page updated as it runs.");
+      setNotice(wasFailed ? "Pipeline restarted. We will keep this page updated as it runs." : "Handover started. We will keep this page updated as it runs.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The handover could not be started.");
     } finally {
@@ -339,9 +348,10 @@ export function DataIntakeClient() {
   function openDecisionCenter() {
     localStorage.setItem("stratveda-onboarding-completed-step", "2");
     localStorage.setItem("stratveda-onboarding-resume-route", "/decision-center");
-    beginOnboardingTransition();
-    router.push("/decision-center");
+    setIsOpeningCenter(true);
   }
+
+  const finishOpeningCenter = useCallback(() => router.push("/decision-center"), [router]);
 
   async function handleSkip() {
     if (busy) return;
@@ -380,7 +390,7 @@ export function DataIntakeClient() {
           {!done && (
             <label
               className={`${styles.dropzone}${dragging ? ` ${styles.isDragging}` : ""}`}
-              onDragOver={(event) => { event.preventDefault(); if (!processing) setDragging(true); }}
+              onDragOver={(event) => { event.preventDefault(); if (canAddFiles) setDragging(true); }}
               onDragLeave={() => setDragging(false)}
               onDrop={onDrop}
             >
@@ -388,7 +398,7 @@ export function DataIntakeClient() {
                 ref={inputRef}
                 type="file"
                 multiple
-                disabled={processing || busy}
+                disabled={!canAddFiles}
                 accept=".pdf,.docx,.xlsx,.csv,.json,.txt,.png,.jpg,.jpeg"
                 onChange={(event) => {
                   addFiles(Array.from(event.target.files ?? []));
@@ -396,8 +406,8 @@ export function DataIntakeClient() {
                 }}
               />
               <span className={styles.dropIcon} aria-hidden="true"><FontAwesomeIcon icon={faCloudArrowUp} /></span>
-              <strong>{processing ? "Files are already in the pipeline" : "Drop files here or browse"}</strong>
-              <span>Select up to {MAX_FILES} files. A malware scan runs before any extraction.</span>
+              <strong>{processing ? "Files are being handed over" : existingCount + selected.length >= MAX_FILES ? `You have added ${MAX_FILES} files` : existingCount ? "Add more files or browse" : "Drop files here or browse"}</strong>
+              <span>Add files together or one at a time, up to {MAX_FILES} in total. A malware scan runs before any extraction.</span>
               <span className={styles.formats} aria-label="Accepted formats">
                 {FORMAT_LABELS.map((label) => <span key={label}>{label}</span>)}
               </span>
@@ -536,9 +546,9 @@ export function DataIntakeClient() {
                   {busy ? "Uploading…" : `Upload ${selected.length} ${selected.length === 1 ? "file" : "files"}`}
                 </button>
               )}
-              {!done && !failed && selected.length === 0 && existingCount === 0 && !processing && (
+              {!done && !failed && selected.length === 0 && !processing && (
                 <button className={styles.primary} type="button" onClick={() => void handleComplete()} disabled={busy}>
-                  Use profile only <FontAwesomeIcon icon={faArrowRight} />
+                  {existingCount === 0 ? "Use profile only" : filesSettling ? `Hand over when scanned (${existingCount})` : `Hand over ${existingCount} ${existingCount === 1 ? "file" : "files"}`} <FontAwesomeIcon icon={faArrowRight} />
                 </button>
               )}
               {failed && (
@@ -595,14 +605,9 @@ export function DataIntakeClient() {
             </div>
           </div>
 
-          {data?.masterSummary && (
-            <p className={styles.railNote}><strong>Master Agent:</strong> {data.masterSummary}</p>
-          )}
-          {!data?.masterSummary && (
-            <p className={styles.railNote}>
-              <strong>Your data stays staged.</strong> Quarantine is temporary; only the clean copy is read, and the Agent receives text only.
-            </p>
-          )}
+          <p className={styles.railNote}>
+            <strong>Your data stays staged.</strong> Quarantine is temporary; only the clean copy is read, and the Agent receives text only.
+          </p>
 
           {loading && (
             <div className={styles.empty} aria-live="polite">
@@ -612,6 +617,7 @@ export function DataIntakeClient() {
           )}
         </aside>
       </div>
+      {isOpeningCenter && <OnboardingCompletionSequence steps={completionSteps} status="ready" onComplete={finishOpeningCenter} />}
     </section>
   );
 }
