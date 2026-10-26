@@ -415,7 +415,7 @@ export function DataIntakeClient() {
   function onDrop(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
     setDragging(false);
-    if (!canAddFiles || done) return;
+    if (!canAddFiles) return;
     addFiles(Array.from(event.dataTransfer.files));
   }
 
@@ -494,7 +494,7 @@ export function DataIntakeClient() {
 
   const title = done ? "Your data stage is complete" : failed ? "The handover needs attention" : existingCount ? "Your files are in the pipeline" : "Add the files behind your numbers";
   const subtitle = done
-    ? "Review what was handed over, then open your Decision Center."
+    ? "Review what was handed over, add or replace files, or open your Decision Center."
     : failed
       ? "Nothing was lost. Retry the handover or skip this optional step."
       : "Upload together or one at a time. Every file is scanned before a clean copy is read.";
@@ -536,9 +536,9 @@ export function DataIntakeClient() {
           </header>
 
           <div className={styles.cardBody}>
-            {!done && (
+            {!processing && (
               <label
-                className={`${styles.dropzone}${dragging ? ` ${styles.isDragging}` : ""}${canAddFiles ? "" : ` ${styles.isDisabled}`}`}
+                className={`${styles.dropzone}${done ? ` ${styles.isCompact}` : ""}${dragging ? ` ${styles.isDragging}` : ""}${canAddFiles ? "" : ` ${styles.isDisabled}`}`}
                 onDragOver={(event) => { event.preventDefault(); if (canAddFiles) setDragging(true); }}
                 onDragLeave={() => setDragging(false)}
                 onDrop={onDrop}
@@ -556,13 +556,17 @@ export function DataIntakeClient() {
                 />
                 <span className={styles.dropIcon} ref={dropIconRef} aria-hidden="true"><FontAwesomeIcon icon={faCloudArrowUp} /></span>
                 <span className={styles.dropCopy}>
-                  <strong>{processing ? "Files are being handed over" : existingCount + selected.length >= MAX_FILES ? `You have added ${MAX_FILES} files` : dragging ? "Release to add these files" : existingCount ? "Drop more files, or browse" : "Drop files here, or browse"}</strong>
-                  <span>PDF, Word, Excel, CSV, JSON, text and images · up to 25 MB each · {MAX_FILES} files in total</span>
+                  <strong>{existingCount + selected.length >= MAX_FILES ? `You have added ${MAX_FILES} files` : dragging ? "Release to add these files" : done ? "Add or replace files" : existingCount ? "Drop more files, or browse" : "Drop files here, or browse"}</strong>
+                  <span>{done
+                    ? "New files reopen this stage. Your current brief stays in place until you hand over again."
+                    : `PDF, Word, Excel, CSV, JSON, text and images · up to 25 MB each · ${MAX_FILES} files in total`}</span>
                 </span>
                 {canAddFiles && <span className={styles.browse}>Browse files</span>}
-                <span className={styles.formats} aria-label="Accepted formats">
-                  {FORMAT_LABELS.map((label) => <span key={label}>{label}</span>)}
-                </span>
+                {!done && (
+                  <span className={styles.formats} aria-label="Accepted formats">
+                    {FORMAT_LABELS.map((label) => <span key={label}>{label}</span>)}
+                  </span>
+                )}
               </label>
             )}
 
@@ -613,7 +617,7 @@ export function DataIntakeClient() {
                   {data.files.map((file) => {
                     const status = fileStatus(file.status);
                     const progress = fileProgress(file);
-                    const canRemove = (file.status === "blocked" || file.status === "failed") && !done && !processing;
+                    const canRemove = (file.status === "blocked" || file.status === "failed") && !processing;
                     return (
                       <li className={`${styles.fileCard}${progress.failedAt >= 0 ? ` ${styles.isFailed}` : ""}`} key={file.id} data-file-id={file.id}>
                         <span className={styles.extBadge}>{extensionOf(file.name)}</span>
@@ -684,7 +688,7 @@ export function DataIntakeClient() {
                 <div className={styles.resultCopy}>
                   <strong>{blockedFiles.length} {blockedFiles.length === 1 ? "file was" : "files were"} excluded</strong>
                   <span className={styles.resultMeta}>
-                    {done ? "The handover continued with your other data." : "Remove excluded files to free their slots. The rest can continue."}
+                    {done ? "The handover continued with your other data. Remove the file and upload a replacement to include it." : "Remove excluded files to free their slots. The rest can continue."}
                   </span>
                 </div>
               </div>

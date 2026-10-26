@@ -202,6 +202,26 @@
     linear-gradient(160deg, #f1f9f4, #e9f5ed);
 }
 
+.dropzone.isCompact {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  justify-items: start;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  text-align: left;
+}
+
+.dropzone.isCompact .dropIcon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  font-size: 18px;
+}
+
+.dropzone.isCompact .dropCopy strong {
+  font-size: 15px;
+}
+
 .dropzone.isDisabled {
   cursor: not-allowed;
   opacity: 0.7;
@@ -1079,6 +1099,16 @@
 
   .fileCard {
     grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .dropzone.isCompact {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .dropzone.isCompact .browse {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    text-align: center;
   }
 
   .fileActions {

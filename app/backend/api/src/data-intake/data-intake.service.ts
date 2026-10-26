@@ -82,7 +82,9 @@ export class DataIntakeService {
           masterStatus: 'pending',
           handoverRequested: false,
         },
-        $unset: { error: 1, completedAt: 1, evidencePackageText: 1, masterResponse: 1 },
+        // The previous package and Master Agent response stay until a new handover
+        // replaces them, so the Decision Center brief never goes blank in between.
+        $unset: { error: 1, completedAt: 1 },
         $inc: { generation: 1 },
       },
       { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
@@ -121,7 +123,9 @@ export class DataIntakeService {
           masterStatus: 'pending',
           handoverRequested: true,
         },
-        $unset: { error: 1, completedAt: 1, evidencePackageText: 1, masterResponse: 1 },
+        // The previous package and Master Agent response stay until a new handover
+        // replaces them, so the Decision Center brief never goes blank in between.
+        $unset: { error: 1, completedAt: 1 },
         $inc: { generation: 1 },
       },
       { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
