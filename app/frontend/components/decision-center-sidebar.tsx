@@ -31,9 +31,7 @@ function formatWhen(value: string): string {
 const items: { label: string; href: string; icon: IconName }[] = [
   { label: "Overview", href: "/decision-center", icon: "dashboard" },
   { label: "Decision Workspace", href: "/decision-workspace", icon: "chat" },
-  { label: "Your First Decision Brief", href: "/executive-brief", icon: "report" },
   { label: "Business Profile", href: "/business-fingerprint", icon: "brain" },
-  { label: "Connect Your Business Data", href: "/evidence-library", icon: "report" },
 ];
 
 export function DecisionCenterSidebar() {

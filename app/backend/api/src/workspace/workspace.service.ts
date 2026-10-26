@@ -26,6 +26,7 @@ const agentInstruction = [
   'Attached evidence under UPLOADED EVIDENCE CONTENTS carries its real text — CSV/JSON rows, Excel sheets as tab-separated rows, and Word paragraphs. Answer from it when the question is about that file, quote the figures, and say which file and sheet you used.',
   'Excel sheets arrive tab-separated: a cell may itself contain a pipe or comma, so count columns from the header row rather than splitting on those.',
   'Legacy .xls/.doc, PDF and image attachments are recorded as names and sizes only, so you cannot read them: say so plainly and never quote, summarise or invent what such a document says.',
+  'The customer\'s decision brief is the Master Agent handover in the context block; when they ask about "the brief", its focus or its next steps, answer from it and quote it where useful.',
   'When the saved setup and the file contents do not cover the question, say so plainly and name the setup step that would fill the gap. Do not invent numbers.',
 ].join(' ');
 
