@@ -6,7 +6,9 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { jwtLifetimeSeconds } from './auth/jwt-lifetime';
+import { DataIntakeModule } from './data-intake/data-intake.module';
 import { FoundryChatModule } from './foundry/foundry-chat.module';
+import { HealthController } from './health.controller';
 import { WorkspaceModule } from './workspace/workspace.module';
 
 @Module({
@@ -44,7 +46,9 @@ import { WorkspaceModule } from './workspace/workspace.module';
     FoundryChatModule,
     AuthModule,
     WorkspaceModule,
+    DataIntakeModule,
   ],
+  controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

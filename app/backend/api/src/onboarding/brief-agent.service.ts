@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { FoundryChatService } from '../foundry/foundry-chat.service';
+import { DataIntakeSession } from '../data-intake/data-intake.schema';
 import { CompanyDetails } from './company-details.schema';
 import { DecisionProfile } from './decision-profile.schema';
 import { EvidenceItem } from './evidence-item.schema';
@@ -35,20 +36,22 @@ export class BriefAgentService {
     @InjectModel(DecisionProfile.name) private readonly decisionProfiles: Model<DecisionProfile>,
     @InjectModel(EvidenceItem.name) private readonly evidenceItems: Model<EvidenceItem>,
     @InjectModel(ExecutiveBrief.name) private readonly executiveBriefs: Model<ExecutiveBrief>,
+    @InjectModel(DataIntakeSession.name) private readonly dataIntakes: Model<DataIntakeSession>,
   ) {}
 
   /** A model failure is stored and returned as a saved failure, never thrown. */
   async generate(userId: string): Promise<BriefPayload> {
     const owner = new Types.ObjectId(userId);
-    const [company, context, profile, evidence, brief] = await Promise.all([
+    const [company, context, profile, evidence, brief, dataIntake] = await Promise.all([
       this.companyDetails.findOne({ userId: owner }).lean().exec(),
       this.strategicContexts.findOne({ userId: owner }).lean().exec(),
       this.decisionProfiles.findOne({ userId: owner }).lean().exec(),
       this.evidenceItems.find({ userId: owner }).sort({ createdAt: 1 }).lean().exec(),
       this.executiveBriefs.findOne({ userId: owner }).lean().exec(),
+      this.dataIntakes.findOne({ userId: owner }).select('status evidencePackageText masterResponse').lean().exec(),
     ]);
 
-    const input = formatOnboardingContext({ company, context, profile, evidence, brief });
+    const input = formatOnboardingContext({ company, context, profile, evidence, brief, dataIntake });
     let payload: BriefPayload;
     try {
       const reply = await this.foundry.complete([

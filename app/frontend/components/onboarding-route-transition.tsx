@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 const onboardingRoutes = new Set([
   "/business-fingerprint",
+  "/data-intake",
   "/strategic-context",
   "/decision-profile",
   "/evidence-library",

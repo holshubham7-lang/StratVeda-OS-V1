@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { RevokedToken, RevokedTokenSchema } from '../auth/revoked-token.schema';
+import { DataIntakeSession, DataIntakeSessionSchema } from '../data-intake/data-intake.schema';
 import { CompanyDetails, CompanyDetailsSchema } from '../onboarding/company-details.schema';
 import { DecisionProfile, DecisionProfileSchema } from '../onboarding/decision-profile.schema';
 import { EvidenceItem, EvidenceItemSchema } from '../onboarding/evidence-item.schema';
@@ -24,6 +25,7 @@ import { WorkspaceThread, WorkspaceThreadSchema } from './workspace-thread.schem
     { name: DecisionProfile.name, schema: DecisionProfileSchema },
     { name: EvidenceItem.name, schema: EvidenceItemSchema },
     { name: ExecutiveBrief.name, schema: ExecutiveBriefSchema },
+    { name: DataIntakeSession.name, schema: DataIntakeSessionSchema },
   ])],
   controllers: [WorkspaceController],
   providers: [WorkspaceService, EvidenceStorageService],

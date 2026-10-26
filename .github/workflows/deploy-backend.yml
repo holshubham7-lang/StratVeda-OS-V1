@@ -1,0 +1,66 @@
+name: Deploy backend API
+
+on:
+  push:
+    branches: [development]
+    paths:
+      - "app/backend/api/**"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-backend-development
+  cancel-in-progress: false
+
+jobs:
+  deploy-api:
+    if: github.ref == 'refs/heads/development'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/backend/api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app/backend/api
+        run: npm ci
+
+      - name: Build API
+        working-directory: app/backend/api
+        run: npm run build
+
+      - name: Trim development dependencies
+        working-directory: app/backend/api
+        run: npm prune --omit=dev
+
+      - name: Deploy API to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: revops-api-dev
+          publish-profile: ${{ secrets.AZURE_API_PUBLISH_PROFILE }}
+          package: app/backend/api
+          clean: true
+          restart: true
+
+      - name: Verify API health
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_url="https://revops-api-dev.azurewebsites.net"
+          for attempt in $(seq 1 30); do
+            if curl --silent --show-error --fail "$base_url/api/health?check=$GITHUB_RUN_ID-$attempt" | grep -Fq '"status":"ok"'; then
+              exit 0
+            fi
+            if [[ "$attempt" == 30 ]]; then
+              echo "The API did not return its health response after deployment."
+              exit 1
+            fi
+            sleep 10
+          done

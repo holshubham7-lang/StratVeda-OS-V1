@@ -29,9 +29,30 @@ Returns only `{ "status": true, "message": "Logged in successfully" }` in JSON. 
 
 After provider verification, each successful new registration is recorded in `user_activities` with the user ID, `activity: signup`, provider, timestamp, request IP, user-agent, and available browser/OS/device hints (including device model when the browser supplies it). Returning users are recorded as `login`. Browsers do not expose a reliable unique machine identifier or hardware inventory, so the API does not invent or collect one. IP is taken from Express's resolved request IP; behind a reverse proxy, configure Express `trust proxy` only for the trusted proxy infrastructure before relying on client IP values. These logs contain personal data and should have access controls and a retention policy appropriate to your deployment.
 
-The authenticated onboarding API stores the business fingerprint in the `company_details` collection, one document per user. It enforces required company name, industry, exactly one allowed business model, team size, revenue range, company stage, and country; website, state, and city are optional. Saving the first form sets the resume step to Strategic Context, so a later login returns to that second form. The Previous action can still return to edit the saved company details.
+The authenticated onboarding API stores the business fingerprint in the `company_details` collection, one document per user. It enforces required company name, industry, exactly one allowed business model, team size, revenue range, company stage, and country; website, state, and city are optional. Saving the first form enables the discovery interview, and a later login resumes from the first incomplete onboarding stage. The Previous action can still return to edit the saved company details.
 
-The discovery interview stores the user's problem statement, every successful user/agent turn, and Responses API continuation identifiers in the `problem_interviews` collection, scoped to the authenticated user. It invokes the configured `AZURE_FOUNDRY_INTERVIEW_AGENT_ENDPOINT` and lets the agent choose how many follow-up questions to ask. The agent is prompted to return `[[INTERVIEW_COMPLETE]]` on a line by itself once it has enough information. Login progress is derived from MongoDB: no saved company record resumes at Business Fingerprint Step 1; a saved company record without a completed interview resumes at Step 2; completing the interview advances to Strategic Context. Agent endpoints require Microsoft Entra authentication; API keys are not supported. In Azure App Service, enable a system-assigned managed identity on the API host and grant it the Foundry Agent Consumer role on the project. Locally, `AZURE_FOUNDRY_ACCESS_TOKEN` can hold a short-lived token for the `https://ai.azure.com/` audience.
+The discovery interview stores the user's problem statement, every successful user/agent turn, and Responses API continuation identifiers in the `problem_interviews` collection, scoped to the authenticated user. It invokes the configured `AZURE_FOUNDRY_INTERVIEW_AGENT_ENDPOINT` and lets the agent choose how many follow-up questions to ask. The agent is prompted to return `[[INTERVIEW_COMPLETE]]` on a line by itself once it has enough information. Login progress is derived from MongoDB: no saved company record resumes at Business Fingerprint Step 1; a saved company record without a completed interview resumes at Step 2; completing the interview advances to the optional company-data stage, and `ready` or `skipped` continues to Strategic Context. Agent endpoints require Microsoft Entra authentication; API keys are not supported. In Azure App Service, enable a system-assigned managed identity on the API host and grant it the Foundry Agent Consumer role on the project. Locally, `AZURE_FOUNDRY_ACCESS_TOKEN` can hold a short-lived token for the `https://ai.azure.com/` audience.
+
+## Optional company-data intake
+
+After the discovery interview, the frontend routes to `/data-intake`. Its endpoints are authenticated and origin-checked:
+
+`GET /api/data-intake`
+`POST /api/data-intake/files` (multipart `files`, up to 5 files, 25 MB each)
+`DELETE /api/data-intake/files/:id` (blocked or failed files only)
+`POST /api/data-intake/complete`
+`POST /api/data-intake/skip`
+
+Accepted files are PDF, DOCX, XLSX, CSV, JSON, TXT, PNG, JPG, and JPEG; legacy `.doc` and `.xls` are rejected. Uploads land in `data-intake-quarantine` and are never read until Defender reports `No threats found`. A byte-identical clean copy is stored in `data-intake-clean`, then text is extracted with Document Intelligence, the workspace Office readers, or plain-text parsing. Extracted text is capped at 50,000 characters per file and checked with Prompt Shields before it can reach the Data Agent.
+
+The pipeline requires the following configuration:
+
+- `AZURE_STORAGE_ACCOUNT`, `AZURE_STORAGE_QUARANTINE_CONTAINER`, `AZURE_STORAGE_CLEAN_CONTAINER`
+- `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` (or `AZURE_DOCUMENT_INTELLIGENCE_KEY`)
+- `AZURE_CONTENT_SAFETY_ENDPOINT` (or `AZURE_CONTENT_SAFETY_KEY`)
+- `AZURE_DATA_AGENT_A2A_ENDPOINT` and `AZURE_MASTER_AGENT_ENDPOINT`
+
+In Azure, the API's managed identity needs `Storage Blob Data Contributor` on the storage account, `Cognitive Services User` on Document Intelligence and Content Safety, and `Foundry Agent Consumer` on both Foundry agents. The current MVP polls blob index tags every few seconds for the Defender verdict, so no Event Grid webhook is required. `GET /api/health` returns `{ "status": "ok" }` for deployment checks.
 
 The API JWT is issued only after the provider token is verified and the account is found or created. It is signed with HS256 and includes an issuer, audience, expiry, and unique token ID. Its lifetime is at least 24 hours; a longer `JWT_EXPIRES_IN` value is honored, while shorter or invalid values fall back to 24 hours. The browser sends the `ri_access_token` cookie on credentialed requests; frontend fetch calls must use `credentials: "include"`. Apply `JwtAuthGuard` to protected API routes so revoked tokens are rejected. Login and logout requests validate the frontend `Origin`, and the cookie uses `SameSite=Lax` (`Secure` is enabled in production). Keep these origin checks when adding state-changing cookie-authenticated routes; add CSRF tokens as well if cross-site use cases require relaxing SameSite.
 
