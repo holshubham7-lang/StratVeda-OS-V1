@@ -1,13 +1,15 @@
 "use client";
 
-import { DragEvent, useCallback, useEffect, useRef, useState } from "react";
+import { DragEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import gsap from "gsap";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faArrowRight,
+  faCheck,
   faCloudArrowUp,
-  faFile,
+  faFileLines,
+  faLock,
   faShieldHalved,
   faTriangleExclamation,
   faXmark,
@@ -22,6 +24,10 @@ const ALLOWED_EXTENSIONS = new Set(["pdf", "docx", "xlsx", "csv", "json", "txt",
 const FORMAT_LABELS = ["PDF", "DOCX", "XLSX", "CSV", "JSON", "TXT", "PNG", "JPG"];
 const TERMINAL_FILE_STATES = new Set(["ready", "blocked", "failed"]);
 const completionSteps = ["PERSONAL & COMPANY DETAILS", "DISCOVERY INTERVIEW", "COMPANY DATA", "MASTER AGENT HANDOVER"];
+const fileSteps = ["Upload", "Scan", "Extract", "Ready"];
+const RING_RADIUS = 34;
+const RING_LENGTH = 2 * Math.PI * RING_RADIUS;
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 type IntakeFile = {
   id: string;
@@ -70,6 +76,10 @@ function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 KB";
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function extensionOf(name: string) {
+  return (name.split(".").pop() ?? "").toUpperCase().slice(0, 4) || "FILE";
 }
 
 function errorMessage(payload: unknown, fallback: string) {
@@ -159,7 +169,7 @@ function stageIndex(stage: StageKey) {
 }
 
 function stagePercent(stage: StageKey, uploadProgress: number | null) {
-  if (stage === "upload") return Math.max(6, uploadProgress ?? 6);
+  if (stage === "upload") return Math.max(6, Math.round((uploadProgress ?? 0) * 0.2));
   if (stage === "scan") return 32;
   if (stage === "extract") return 57;
   if (stage === "staged") return 70;
@@ -169,13 +179,23 @@ function stagePercent(stage: StageKey, uploadProgress: number | null) {
 }
 
 function annotationFor(stage: StageKey) {
-  if (stage === "upload") return "Uploading to quarantine";
+  if (stage === "upload") return "Waiting for files";
   if (stage === "scan") return "Waiting for Defender";
   if (stage === "extract") return "Reading approved files";
   if (stage === "staged") return "Ready to hand over";
   if (stage === "format") return "Building evidence package";
   if (stage === "done") return "Handover complete";
   return "Needs attention";
+}
+
+function railDetailFor(stage: StageKey) {
+  if (stage === "upload") return "Add files on the left, or continue with your profile only.";
+  if (stage === "scan") return "Each file is held in quarantine until Defender clears it.";
+  if (stage === "extract") return "Text is read only from the verified clean copy.";
+  if (stage === "staged") return "Add more files, or hand them over when you are ready.";
+  if (stage === "format") return "The Data Agent is preparing your evidence package.";
+  if (stage === "done") return "Your Master Agent has everything it needs.";
+  return "The handover stopped. Retry it from the card.";
 }
 
 function fileStatus(status: string) {
@@ -189,11 +209,38 @@ function fileStatus(status: string) {
   return { label: "Waiting", tone: "" };
 }
 
+/** Which of the four per-file steps are done, active, or where the file stopped. */
+function fileProgress(file: IntakeFile) {
+  if (file.status === "ready") return { done: 4, active: -1, failedAt: -1 };
+  if (file.status === "quarantined" || file.status === "scanning") return { done: 1, active: 1, failedAt: -1 };
+  if (file.status === "clean" || file.status === "extracting") return { done: 2, active: 2, failedAt: -1 };
+  if (file.status === "blocked" || file.status === "failed") {
+    const scanned = (file.scanResult ?? "").toLowerCase().startsWith("no threats");
+    const failedAt = scanned ? 2 : 1;
+    return { done: failedAt, active: -1, failedAt };
+  }
+  return { done: 1, active: -1, failedAt: -1 };
+}
+
+/** Older sessions stored raw storage errors; never show XML to a customer. */
+function friendlyFileError(error: string) {
+  if (/azure blob storage|<\?xml|<Code>/i.test(error)) {
+    return "This file could not be checked because of a storage problem on our side. Remove it and try again later.";
+  }
+  return error;
+}
+
 export function DataIntakeClient() {
   const router = useRouter();
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const busyRef = useRef(false);
+  const seenFileIds = useRef<Set<string> | null>(null);
+  const ringRef = useRef<SVGCircleElement>(null);
+  const percentRef = useRef<HTMLSpanElement>(null);
+  const percentValue = useRef({ value: 0 });
+  const fillRef = useRef<HTMLSpanElement>(null);
+  const dropIconRef = useRef<HTMLSpanElement>(null);
   const [data, setData] = useState<IntakeData | null>(null);
   const [selected, setSelected] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -223,14 +270,35 @@ export function DataIntakeClient() {
     void refresh();
   }, []);
 
-  useEffect(() => {
-    if (!rootRef.current || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const reduceMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  useIsomorphicLayoutEffect(() => {
+    if (!rootRef.current || reduceMotion()) return;
     const context = gsap.context(() => {
-      gsap.from("[data-intake-animate]", { opacity: 0, y: 16, duration: 0.55, stagger: 0.08, ease: "power3.out" });
-      gsap.from("[data-intake-rail]", { opacity: 0, x: 14, duration: 0.5, delay: 0.12, ease: "power3.out" });
+      const timeline = gsap.timeline({ defaults: { ease: "power3.out" } });
+      timeline
+        .from("[data-intake-hero] > *", { opacity: 0, y: 14, duration: 0.5, stagger: 0.07 })
+        .from("[data-intake-trust] > *", { opacity: 0, y: 8, scale: 0.96, duration: 0.4, stagger: 0.06 }, "-=0.25")
+        .from("[data-intake-animate]", { opacity: 0, y: 22, duration: 0.6 }, "-=0.2")
+        .from("[data-intake-rail]", { opacity: 0, x: 22, duration: 0.6 }, "<0.08")
+        .from("[data-intake-stage]", { opacity: 0, x: -8, duration: 0.35, stagger: 0.06 }, "-=0.3");
     }, rootRef);
     return () => context.revert();
   }, []);
+
+  // A gentle float on the upload icon tells people the drop zone is live.
+  useEffect(() => {
+    const icon = dropIconRef.current;
+    if (!icon || reduceMotion()) return;
+    const tween = gsap.to(icon, { y: -5, duration: 1.6, ease: "sine.inOut", repeat: -1, yoyo: true });
+    return () => { tween.kill(); };
+  }, [data?.sessionStatus]);
+
+  useEffect(() => {
+    const icon = dropIconRef.current;
+    if (!icon || reduceMotion()) return;
+    gsap.to(icon, { scale: dragging ? 1.12 : 1, rotate: dragging ? -6 : 0, duration: 0.3, ease: "back.out(2)" });
+  }, [dragging]);
 
   const pollKey = data
     ? `${data.sessionStatus}:${data.dataAgentStatus}:${data.masterStatus}:${data.files.map((file) => file.status).join(",")}`
@@ -245,14 +313,69 @@ export function DataIntakeClient() {
 
   const existingCount = data?.files.length ?? 0;
   const stage = loading ? "upload" : stageFor(data, uploadProgress);
-  const percent = stagePercent(stage, uploadProgress);
+  const percent = loading ? 0 : stagePercent(stage, uploadProgress);
   const processing = data?.sessionStatus === "processing";
   const failed = data?.sessionStatus === "failed";
   const done = data?.sessionStatus === "ready" || data?.sessionStatus === "skipped";
   const blockedFiles = data?.files.filter((file) => file.status === "blocked" || file.status === "failed") ?? [];
+  const readyFiles = data?.files.filter((file) => file.status === "ready") ?? [];
   const filesSettling = data?.files.some((file) => !TERMINAL_FILE_STATES.has(file.status)) ?? false;
   const canAddFiles = !processing && !busy && existingCount + selected.length < MAX_FILES;
   const noticeIsError = Boolean(notice && !notice.startsWith("Upload complete") && !notice.startsWith("Handover started") && !notice.startsWith("Pipeline restarted") && !notice.startsWith("File removed"));
+  const activeIndex = stageIndex(stage);
+  const fileIdKey = data?.files.map((file) => file.id).join(",") ?? "";
+
+  // New file cards slide in; cards already on screen stay put during polling.
+  useIsomorphicLayoutEffect(() => {
+    if (!data) return;
+    const ids = new Set(data.files.map((file) => file.id));
+    const seen = seenFileIds.current;
+    seenFileIds.current = ids;
+    if (!seen || !rootRef.current || reduceMotion()) return;
+    const fresh = data.files.filter((file) => !seen.has(file.id));
+    if (!fresh.length) return;
+    const nodes = fresh
+      .map((file) => rootRef.current?.querySelector(`[data-file-id="${CSS.escape(file.id)}"]`))
+      .filter((node): node is Element => Boolean(node));
+    gsap.from(nodes, { opacity: 0, y: 14, scale: 0.97, duration: 0.45, stagger: 0.08, ease: "back.out(1.4)" });
+  }, [fileIdKey]);
+
+  // The ring, its counter and the timeline fill all follow the real pipeline stage.
+  useEffect(() => {
+    const ring = ringRef.current;
+    const label = percentRef.current;
+    const fill = fillRef.current;
+    const target = RING_LENGTH * (1 - percent / 100);
+    const fillScale = Math.min(1, Math.max(0, activeIndex / (stages.length - 1)));
+    if (reduceMotion()) {
+      if (ring) ring.style.strokeDashoffset = String(target);
+      if (label) label.textContent = `${percent}%`;
+      if (fill) fill.style.transform = `scaleY(${fillScale})`;
+      percentValue.current.value = percent;
+      return;
+    }
+    const tweens = [
+      ring && gsap.to(ring, { strokeDashoffset: target, duration: 0.9, ease: "power2.out" }),
+      label && gsap.to(percentValue.current, {
+        value: percent,
+        duration: 0.9,
+        ease: "power2.out",
+        onUpdate: () => { label.textContent = `${Math.round(percentValue.current.value)}%`; },
+      }),
+      fill && gsap.to(fill, { scaleY: fillScale, duration: 0.8, ease: "power2.inOut" }),
+    ];
+    return () => tweens.forEach((tween) => tween?.kill());
+  }, [percent, activeIndex]);
+
+  // Finishing the stage earns a small celebration on the result cards.
+  useIsomorphicLayoutEffect(() => {
+    if (!done || !rootRef.current || reduceMotion()) return;
+    const context = gsap.context(() => {
+      gsap.from("[data-intake-result]", { opacity: 0, y: 12, duration: 0.45, stagger: 0.1, ease: "power2.out" });
+      gsap.from("[data-intake-result-icon]", { scale: 0.3, rotate: -20, duration: 0.6, stagger: 0.1, ease: "back.out(2.2)" });
+    }, rootRef);
+    return () => context.revert();
+  }, [done]);
 
   function addFiles(incoming: File[]) {
     if (!incoming.length) return;
@@ -292,7 +415,7 @@ export function DataIntakeClient() {
   function onDrop(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
     setDragging(false);
-    if (processing || done) return;
+    if (!canAddFiles || done) return;
     addFiles(Array.from(event.dataTransfer.files));
   }
 
@@ -321,7 +444,10 @@ export function DataIntakeClient() {
     setBusy(true);
     setNotice("");
     try {
-      setData(await deleteIntakeFile(file.id));
+      const node = rootRef.current?.querySelector(`[data-file-id="${CSS.escape(file.id)}"]`);
+      const next = await deleteIntakeFile(file.id);
+      if (node && !reduceMotion()) await gsap.to(node, { opacity: 0, x: 18, height: 0, marginTop: 0, paddingBlock: 0, duration: 0.3, ease: "power2.in" });
+      setData(next);
       setNotice("File removed. You can add a replacement file.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "That file could not be removed.");
@@ -366,185 +492,210 @@ export function DataIntakeClient() {
     }
   }
 
-  const activeIndex = stageIndex(stage);
+  const title = done ? "Your data stage is complete" : failed ? "The handover needs attention" : existingCount ? "Your files are in the pipeline" : "Add the files behind your numbers";
+  const subtitle = done
+    ? "Review what was handed over, then open your Decision Center."
+    : failed
+      ? "Nothing was lost. Retry the handover or skip this optional step."
+      : "Upload together or one at a time. Every file is scanned before a clean copy is read.";
+  const footerNote = notice || (done
+    ? (data?.sessionStatus === "skipped" ? "You skipped the optional data stage." : "Step 1, Step 2, and the evidence package were handed to the Master Agent.")
+    : processing
+      ? "You can leave this page — the pipeline keeps running."
+      : "");
 
   return (
     <section className={styles.shell} ref={rootRef} aria-labelledby="data-intake-title">
-      <div className={styles.heading}>
-        <p className={styles.optional}><i aria-hidden="true" />OPTIONAL · COMPANY DATA</p>
+      <div className={styles.heading} data-intake-hero>
+        <p className={styles.optional}><i aria-hidden="true" />STEP 3 · OPTIONAL · COMPANY DATA</p>
         <h1 id="data-intake-title">Ground your evidence package</h1>
-        <p>Add company data after the interview. Files are scanned before a clean copy is read, and only approved text reaches the Data Agent.</p>
+        <p>Add company data after the interview. Only approved text from scanned, clean copies reaches the Data Agent.</p>
       </div>
+      <ul className={styles.trust} data-intake-trust aria-label="How your files are protected">
+        <li><FontAwesomeIcon icon={faShieldHalved} aria-hidden="true" /> Defender malware scan</li>
+        <li><FontAwesomeIcon icon={faLock} aria-hidden="true" /> Quarantined until clean</li>
+        <li><FontAwesomeIcon icon={faFileLines} aria-hidden="true" /> Agents receive text only</li>
+      </ul>
 
       <div className={styles.workspace}>
         <div className={styles.card} data-intake-animate>
           <header className={styles.cardHeader}>
             <div>
               <span className={styles.kicker}>COMPANY DATA</span>
-              <h2>{done ? "Your data stage is complete" : failed ? "The pipeline needs attention" : "Add the files behind your numbers"}</h2>
-              <p>{done ? "Review what was handed over, then open your Decision Center." : "PDF, Word, Excel, CSV, JSON, text, and images up to 25 MB each. Legacy .doc and .xls are not accepted."}</p>
+              <h2>{title}</h2>
+              <p>{subtitle}</p>
             </div>
-            <span className={styles.capacity}>{existingCount}/{MAX_FILES} files</span>
+            <div className={styles.capacity} aria-label={`${existingCount} of ${MAX_FILES} files added`}>
+              <span><strong>{existingCount}</strong> of {MAX_FILES} files</span>
+              <span className={styles.capacityBars} aria-hidden="true">
+                {Array.from({ length: MAX_FILES }, (_, index) => (
+                  <i key={index} className={index < existingCount ? styles.isFilled : index < existingCount + selected.length ? styles.isQueued : ""} />
+                ))}
+              </span>
+            </div>
           </header>
 
-          {!done && (
-            <label
-              className={`${styles.dropzone}${dragging ? ` ${styles.isDragging}` : ""}`}
-              onDragOver={(event) => { event.preventDefault(); if (canAddFiles) setDragging(true); }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={onDrop}
-            >
-              <input
-                ref={inputRef}
-                type="file"
-                multiple
-                disabled={!canAddFiles}
-                accept=".pdf,.docx,.xlsx,.csv,.json,.txt,.png,.jpg,.jpeg"
-                onChange={(event) => {
-                  addFiles(Array.from(event.target.files ?? []));
-                  event.target.value = "";
-                }}
-              />
-              <span className={styles.dropIcon} aria-hidden="true"><FontAwesomeIcon icon={faCloudArrowUp} /></span>
-              <strong>{processing ? "Files are being handed over" : existingCount + selected.length >= MAX_FILES ? `You have added ${MAX_FILES} files` : existingCount ? "Add more files or browse" : "Drop files here or browse"}</strong>
-              <span>Add files together or one at a time, up to {MAX_FILES} in total. A malware scan runs before any extraction.</span>
-              <span className={styles.formats} aria-label="Accepted formats">
-                {FORMAT_LABELS.map((label) => <span key={label}>{label}</span>)}
-              </span>
-            </label>
-          )}
+          <div className={styles.cardBody}>
+            {!done && (
+              <label
+                className={`${styles.dropzone}${dragging ? ` ${styles.isDragging}` : ""}${canAddFiles ? "" : ` ${styles.isDisabled}`}`}
+                onDragOver={(event) => { event.preventDefault(); if (canAddFiles) setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={onDrop}
+              >
+                <input
+                  ref={inputRef}
+                  type="file"
+                  multiple
+                  disabled={!canAddFiles}
+                  accept=".pdf,.docx,.xlsx,.csv,.json,.txt,.png,.jpg,.jpeg"
+                  onChange={(event) => {
+                    addFiles(Array.from(event.target.files ?? []));
+                    event.target.value = "";
+                  }}
+                />
+                <span className={styles.dropIcon} ref={dropIconRef} aria-hidden="true"><FontAwesomeIcon icon={faCloudArrowUp} /></span>
+                <span className={styles.dropCopy}>
+                  <strong>{processing ? "Files are being handed over" : existingCount + selected.length >= MAX_FILES ? `You have added ${MAX_FILES} files` : dragging ? "Release to add these files" : existingCount ? "Drop more files, or browse" : "Drop files here, or browse"}</strong>
+                  <span>PDF, Word, Excel, CSV, JSON, text and images · up to 25 MB each · {MAX_FILES} files in total</span>
+                </span>
+                {canAddFiles && <span className={styles.browse}>Browse files</span>}
+                <span className={styles.formats} aria-label="Accepted formats">
+                  {FORMAT_LABELS.map((label) => <span key={label}>{label}</span>)}
+                </span>
+              </label>
+            )}
 
-          {selected.length > 0 && (
-            <div className={styles.selection}>
-              <div className={styles.selectionTop}>
-                <strong>{selected.length} ready to upload</strong>
-                <button type="button" onClick={() => setSelected([])} disabled={busy}>Clear</button>
-              </div>
-              {selected.map((file) => (
-                <div className={styles.selectedRow} key={`${file.name}:${file.size}:${file.lastModified}`}>
-                  <FontAwesomeIcon icon={faFile} aria-hidden="true" />
-                  <strong>{file.name}</strong>
-                  <span>{formatBytes(file.size)}</span>
-                  <button
-                    className={styles.remove}
-                    type="button"
-                    aria-label={`Remove ${file.name}`}
-                    disabled={busy}
-                    onClick={() => setSelected((current) => current.filter((item) => item !== file))}
-                  >
-                    <FontAwesomeIcon icon={faXmark} />
-                  </button>
+            {selected.length > 0 && (
+              <div className={styles.queue}>
+                <div className={styles.sectionTop}>
+                  <strong>{selected.length} {selected.length === 1 ? "file" : "files"} ready to upload</strong>
+                  <button className={styles.textButton} type="button" onClick={() => setSelected([])} disabled={busy}>Clear</button>
                 </div>
-              ))}
-            </div>
-          )}
-
-          {uploadProgress !== null && (
-            <div className={styles.uploadBar} role="status" aria-live="polite">
-              <div className={styles.progressTrack}>
-                <div className={styles.progressFill} style={{ width: `${uploadProgress}%` }} />
-              </div>
-              <div className={styles.progressMeta}>
-                <span>Uploading to quarantine</span>
-                <span>{uploadProgress}%</span>
-              </div>
-            </div>
-          )}
-
-          {data && data.files.length > 0 && (
-            <div className={styles.fileList} aria-label="Uploaded files">
-              {data.files.map((file) => {
-                const status = fileStatus(file.status);
-                return (
-                  <div className={styles.fileRow} key={file.id}>
-                    <span className={styles.fileIcon} aria-hidden="true"><FontAwesomeIcon icon={faFile} /></span>
-                    <span className={styles.fileCopy}>
+                <ul className={styles.queueList}>
+                  {selected.map((file) => (
+                    <li className={styles.queueRow} key={`${file.name}:${file.size}:${file.lastModified}`}>
+                      <span className={styles.extBadge}>{extensionOf(file.name)}</span>
                       <strong>{file.name}</strong>
-                      <span>
-                        {formatBytes(file.size)}
-                        {file.status === "ready" && file.extractedChars > 0 ? ` · ${file.extractedChars.toLocaleString()} characters extracted` : ""}
-                        {file.textTruncated ? " · shortened to 50,000 characters" : ""}
-                      </span>
-                      {file.error && <em>{file.error}</em>}
-                    </span>
-                    <span className={styles.fileActions}>
-                      <span className={`${styles.statusPill}${status.tone ? ` ${styles[status.tone]}` : ""}`}>
-                        <i aria-hidden="true" />{status.label}
-                      </span>
-                      {(file.status === "blocked" || file.status === "failed") && !done && !processing && (
-                        <button
-                          className={styles.remove}
-                          type="button"
-                          aria-label={`Remove ${file.name}`}
-                          disabled={busy}
-                          onClick={() => void handleRemoveFile(file)}
-                        >
-                          <FontAwesomeIcon icon={faXmark} />
-                        </button>
-                      )}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {done && data?.evidenceSummary && (
-            <div className={styles.result}>
-              <div className={styles.resultTop}>
-                <span className={styles.resultIcon} aria-hidden="true"><FontAwesomeIcon icon={faShieldHalved} /></span>
-                <div>
-                  <strong>Evidence package ready</strong>
-                  <span>{data.evidenceSummary.packageStatus || "Received by the Master Agent"}</span>
-                </div>
-              </div>
-              {data.evidenceSummary.summary && <p>{data.evidenceSummary.summary}</p>}
-              {data.evidenceSummary.limitations.length > 0 && (
-                <ul className={styles.limitations}>
-                  {data.evidenceSummary.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}
+                      <span>{formatBytes(file.size)}</span>
+                      <button
+                        className={styles.remove}
+                        type="button"
+                        aria-label={`Remove ${file.name}`}
+                        disabled={busy}
+                        onClick={() => setSelected((current) => current.filter((item) => item !== file))}
+                      >
+                        <FontAwesomeIcon icon={faXmark} />
+                      </button>
+                    </li>
+                  ))}
                 </ul>
-              )}
-            </div>
-          )}
+                {uploadProgress !== null ? (
+                  <div className={styles.uploadBar} role="status" aria-live="polite">
+                    <div className={styles.progressTrack}><div className={styles.progressFill} style={{ width: `${uploadProgress}%` }} /></div>
+                    <div className={styles.progressMeta}><span>Uploading to quarantine</span><span>{uploadProgress}%</span></div>
+                  </div>
+                ) : (
+                  <button className={`${styles.primary} ${styles.queueUpload}`} type="button" onClick={() => void handleUpload()} disabled={busy || processing}>
+                    <FontAwesomeIcon icon={faCloudArrowUp} /> Upload {selected.length} {selected.length === 1 ? "file" : "files"}
+                  </button>
+                )}
+              </div>
+            )}
 
-          {failed && (
-            <div className={styles.result} role="alert">
-              <div className={styles.resultTop}>
+            {data && data.files.length > 0 && (
+              <div className={styles.files}>
+                <div className={styles.sectionTop}>
+                  <strong>{done ? "Handed over" : "In the pipeline"}</strong>
+                  <span>{readyFiles.length} ready{blockedFiles.length ? ` · ${blockedFiles.length} excluded` : ""}</span>
+                </div>
+                <ul className={styles.fileList} aria-label="Uploaded files">
+                  {data.files.map((file) => {
+                    const status = fileStatus(file.status);
+                    const progress = fileProgress(file);
+                    const canRemove = (file.status === "blocked" || file.status === "failed") && !done && !processing;
+                    return (
+                      <li className={`${styles.fileCard}${progress.failedAt >= 0 ? ` ${styles.isFailed}` : ""}`} key={file.id} data-file-id={file.id}>
+                        <span className={styles.extBadge}>{extensionOf(file.name)}</span>
+                        <span className={styles.fileCopy}>
+                          <strong title={file.name}>{file.name}</strong>
+                          <span>
+                            {formatBytes(file.size)}
+                            {file.status === "ready" && file.extractedChars > 0 ? ` · ${file.extractedChars.toLocaleString()} characters extracted` : ""}
+                            {file.textTruncated ? " · shortened to 50,000 characters" : ""}
+                          </span>
+                          <span className={styles.fileSteps} aria-label={`Progress: ${status.label}`}>
+                            {fileSteps.map((step, index) => {
+                              const state = index === progress.failedAt ? styles.isFailed : index < progress.done ? styles.isDone : index === progress.active ? styles.isActive : "";
+                              return <span className={`${styles.fileStep}${state ? ` ${state}` : ""}`} key={step}><i />{step}</span>;
+                            })}
+                          </span>
+                        </span>
+                        <span className={styles.fileActions}>
+                          <span className={`${styles.statusPill}${status.tone ? ` ${styles[status.tone]}` : ""}`}><i aria-hidden="true" />{status.label}</span>
+                          {canRemove && (
+                            <button className={styles.remove} type="button" aria-label={`Remove ${file.name}`} disabled={busy} onClick={() => void handleRemoveFile(file)}>
+                              <FontAwesomeIcon icon={faXmark} />
+                            </button>
+                          )}
+                        </span>
+                        {file.error && (
+                          <p className={styles.fileError}>
+                            <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden="true" />
+                            <span>{friendlyFileError(file.error)}</span>
+                          </p>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+
+            {done && data?.evidenceSummary && (
+              <div className={`${styles.result} ${styles.isSuccess}`} data-intake-result>
+                <span className={styles.resultIcon} data-intake-result-icon aria-hidden="true"><FontAwesomeIcon icon={faShieldHalved} /></span>
+                <div className={styles.resultCopy}>
+                  <strong>Evidence package ready</strong>
+                  <span className={styles.resultMeta}>{data.evidenceSummary.packageStatus || "Received by the Master Agent"}</span>
+                  {data.evidenceSummary.summary && <p>{data.evidenceSummary.summary}</p>}
+                  {data.evidenceSummary.limitations.length > 0 && (
+                    <ul className={styles.limitations}>
+                      {data.evidenceSummary.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {failed && (
+              <div className={`${styles.result} ${styles.isDanger}`} role="alert">
                 <span className={styles.resultIcon} aria-hidden="true"><FontAwesomeIcon icon={faTriangleExclamation} /></span>
-                <div>
+                <div className={styles.resultCopy}>
                   <strong>Handover did not finish</strong>
-                  <span>{data?.error || "The pipeline stopped before the evidence package was ready."}</span>
+                  <span className={styles.resultMeta}>{data?.error || "The pipeline stopped before the evidence package was ready."}</span>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {blockedFiles.length > 0 && !failed && (
-            <div className={styles.result} role="status">
-              <div className={styles.resultTop}>
-                <span className={styles.resultIcon} aria-hidden="true"><FontAwesomeIcon icon={faTriangleExclamation} /></span>
-                <div>
-                  <strong>Some files were excluded</strong>
-                  <span>{blockedFiles.length} {blockedFiles.length === 1 ? "file was" : "files were"} blocked or could not be processed. The rest can continue.</span>
+            {blockedFiles.length > 0 && !failed && (
+              <div className={`${styles.result} ${styles.isWarning}`} role="status" data-intake-result>
+                <span className={styles.resultIcon} data-intake-result-icon aria-hidden="true"><FontAwesomeIcon icon={faTriangleExclamation} /></span>
+                <div className={styles.resultCopy}>
+                  <strong>{blockedFiles.length} {blockedFiles.length === 1 ? "file was" : "files were"} excluded</strong>
+                  <span className={styles.resultMeta}>
+                    {done ? "The handover continued with your other data." : "Remove excluded files to free their slots. The rest can continue."}
+                  </span>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           <footer className={styles.cardFooter}>
-            <p className={`${styles.notice}${noticeIsError ? ` ${styles.isError}` : ""}`} role="status" aria-live="polite">
-              {notice || (done ? (data?.sessionStatus === "skipped" ? "You skipped the optional data stage." : "Step 1, Step 2, and the evidence package were handed to the Master Agent.") : processing ? "You can leave this page — the pipeline keeps running." : "")}
-            </p>
+            <p className={`${styles.notice}${noticeIsError ? ` ${styles.isError}` : ""}`} role="status" aria-live="polite">{footerNote}</p>
             <div className={styles.actions}>
               {!done && !failed && (
-                <button className={styles.secondary} type="button" onClick={() => void handleSkip()} disabled={busy}>
-                  Skip for now
-                </button>
-              )}
-              {!done && !failed && selected.length > 0 && (
-                <button className={styles.primary} type="button" onClick={() => void handleUpload()} disabled={busy || processing}>
-                  {busy ? "Uploading…" : `Upload ${selected.length} ${selected.length === 1 ? "file" : "files"}`}
-                </button>
+                <button className={styles.secondary} type="button" onClick={() => void handleSkip()} disabled={busy}>Skip for now</button>
               )}
               {!done && !failed && selected.length === 0 && !processing && (
                 <button className={styles.primary} type="button" onClick={() => void handleComplete()} disabled={busy}>
@@ -552,12 +703,12 @@ export function DataIntakeClient() {
                 </button>
               )}
               {failed && (
+                <button className={styles.secondary} type="button" onClick={() => void handleSkip()} disabled={busy}>Skip for now</button>
+              )}
+              {failed && (
                 <button className={styles.primary} type="button" onClick={() => void handleComplete()} disabled={busy}>
                   {busy ? "Retrying…" : "Retry handover"} <FontAwesomeIcon icon={faArrowRight} />
                 </button>
-              )}
-              {failed && (
-                <button className={styles.secondary} type="button" onClick={() => void handleSkip()} disabled={busy}>Skip for now</button>
               )}
               {done && (
                 <button className={styles.primary} type="button" onClick={openDecisionCenter}>
@@ -569,44 +720,52 @@ export function DataIntakeClient() {
         </div>
 
         <aside className={styles.rail} data-intake-rail aria-label="Data pipeline status">
-          <span className={styles.kicker}>LIVE PIPELINE</span>
-          <h2>{annotationFor(stage)}</h2>
+          <div className={styles.railTop}>
+            <div>
+              <span className={styles.kicker}>LIVE PIPELINE</span>
+              <h2>{annotationFor(stage)}</h2>
+              <p>{railDetailFor(stage)}</p>
+            </div>
+            <div className={`${styles.ring}${stage === "error" ? ` ${styles.isError}` : ""}`} role="progressbar" aria-label="Pipeline progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
+              <svg viewBox="0 0 80 80" aria-hidden="true">
+                <circle className={styles.ringTrack} cx="40" cy="40" r={RING_RADIUS} />
+                <circle className={styles.ringValue} ref={ringRef} cx="40" cy="40" r={RING_RADIUS} strokeDasharray={RING_LENGTH} strokeDashoffset={RING_LENGTH} />
+              </svg>
+              <span ref={percentRef}>0%</span>
+            </div>
+          </div>
 
           <ol className={styles.pipeline}>
+            <span className={styles.pipelineTrack} aria-hidden="true"><span ref={fillRef} /></span>
             {stages.map((item, index) => {
+              const warn = item.key === "scan" && blockedFiles.length > 0 && index < activeIndex;
+              const complete = index < activeIndex || (stage === "done" && index === activeIndex);
               const itemState = stage === "error" && index === activeIndex
                 ? styles.isError
-                : index < activeIndex
-                  ? styles.isComplete
-                  : index === activeIndex
-                    ? `${styles.isActive}${stage === "done" ? ` ${styles.isComplete}` : ""}`
-                    : "";
+                : warn
+                  ? styles.isWarning
+                  : complete
+                    ? styles.isComplete
+                    : index === activeIndex
+                      ? stage === "staged" ? styles.isWaiting : styles.isActive
+                      : "";
               return (
-                <li className={`${styles.stage}${itemState ? ` ${itemState}` : ""}`} key={item.key}>
+                <li className={`${styles.stage}${itemState ? ` ${itemState}` : ""}`} key={item.key} data-intake-stage>
                   <span className={styles.stageDot} aria-hidden="true">
-                    {index < activeIndex || (stage === "done" && index === activeIndex) ? "✓" : index + 1}
+                    {warn ? "!" : complete ? <FontAwesomeIcon icon={faCheck} /> : index + 1}
                   </span>
                   <span className={styles.stageCopy}>
                     <strong>{item.label}</strong>
-                    <span>{item.detail}</span>
+                    <span>{warn ? `${blockedFiles.length} ${blockedFiles.length === 1 ? "file" : "files"} excluded · ${item.detail}` : stage === "staged" && index === activeIndex ? "Starts when you hand your files over." : item.detail}</span>
                   </span>
                 </li>
               );
             })}
           </ol>
 
-          <div className={styles.pipelineProgress}>
-            <div className={styles.pipelineProgressTop}>
-              <span>Progress</span>
-              <strong>{loading ? "—" : `${percent}%`}</strong>
-            </div>
-            <div className={styles.progressTrack}>
-              <div className={styles.progressFill} style={{ width: `${loading ? 6 : percent}%` }} />
-            </div>
-          </div>
-
           <p className={styles.railNote}>
-            <strong>Your data stays staged.</strong> Quarantine is temporary; only the clean copy is read, and the Agent receives text only.
+            <FontAwesomeIcon icon={faLock} aria-hidden="true" />
+            <span><strong>Your data stays staged.</strong> Quarantine is temporary; only the clean copy is read, and agents receive text only.</span>
           </p>
 
           {loading && (

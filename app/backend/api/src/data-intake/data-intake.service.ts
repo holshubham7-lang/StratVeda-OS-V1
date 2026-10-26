@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model, Types } from 'mongoose';
@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { CompanyDetails } from '../onboarding/company-details.schema';
 import { ProblemInterview } from '../onboarding/problem-interview.schema';
 import { AgentHandoffService } from './agent-handoff.service';
-import { BlobRestService } from './blob-rest.service';
+import { BlobRestService, BlobStorageError } from './blob-rest.service';
 import {
   maxDataIntakeFiles,
   maxDataIntakeTextChars,
@@ -22,6 +22,7 @@ type SessionRow = DataIntakeSession & { _id: Types.ObjectId };
 
 @Injectable()
 export class DataIntakeService {
+  private readonly logger = new Logger(DataIntakeService.name);
   private readonly quarantineContainer: string;
   private readonly cleanContainer: string;
   private readonly scanTimeoutMs: number;
@@ -212,6 +213,7 @@ export class DataIntakeService {
     } catch (error) {
       const attempts = (file.attempts ?? 0) + 1;
       const retryStatus = file.status === 'clean' || file.status === 'extracting' ? 'clean' : 'scanning';
+      this.logger.warn(`Data-intake file ${file._id.toString()} attempt ${attempts} failed: ${error instanceof Error ? error.message : String(error)}`);
       await this.files.updateOne(
         { _id: file._id },
         {
@@ -219,7 +221,7 @@ export class DataIntakeService {
             status: attempts < 3 ? retryStatus : 'failed',
             attempts,
             ...(attempts < 3 ? {} : { processedAt: new Date() }),
-            error: attempts < 3 ? undefined : this.errorText(error),
+            error: attempts < 3 ? undefined : this.fileErrorText(error, retryStatus),
           },
         },
       );
@@ -554,6 +556,21 @@ export class DataIntakeService {
       ?? tags['malwareScanningScanResult']
       ?? tags['Malware Scanning Scan Result']
       ?? '';
+  }
+
+  /** File errors are shown to the customer, so infrastructure detail stays in the logs. */
+  private fileErrorText(error: unknown, stage: 'clean' | 'scanning') {
+    if (error instanceof BlobStorageError) {
+      if (error.httpStatus === 401 || error.httpStatus === 403) {
+        return stage === 'scanning'
+          ? 'The malware scan result could not be read because of a storage permission problem on our side. Remove the file and try again later.'
+          : 'The scanned copy could not be read because of a storage permission problem on our side. Remove the file and try again later.';
+      }
+      return 'Secure storage was unavailable while processing this file. Remove it and try again.';
+    }
+    return stage === 'scanning'
+      ? 'This file could not be scanned. Remove it and try again.'
+      : 'Text could not be read from this file. Remove it and try again.';
   }
 
   private errorText(error: unknown) {
