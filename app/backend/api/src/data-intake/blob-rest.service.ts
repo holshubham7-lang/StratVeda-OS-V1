@@ -4,6 +4,17 @@ import { AzureTokenService } from './azure-token.service';
 
 const apiVersion = '2023-11-03';
 
+/** Keeps Azure's status and error code for logs; the message never carries the raw XML body. */
+export class BlobStorageError extends ServiceUnavailableException {
+  constructor(
+    readonly operation: string,
+    readonly httpStatus: number,
+    readonly code: string,
+  ) {
+    super(`Azure Blob Storage ${operation} failed (${httpStatus}${code ? ` ${code}` : ''}).`);
+  }
+}
+
 @Injectable()
 export class BlobRestService {
   private readonly endpoint: string;
@@ -20,23 +31,23 @@ export class BlobRestService {
   }
 
   async upload(container: string, blob: string, buffer: Buffer, mimeType: string) {
-    await this.request('PUT', container, blob, undefined, buffer, {
+    await this.request('upload', 'PUT', container, blob, undefined, buffer, {
       'content-type': mimeType || 'application/octet-stream',
       'x-ms-blob-type': 'BlockBlob',
     });
   }
 
   async download(container: string, blob: string) {
-    const response = await this.request('GET', container, blob);
+    const response = await this.request('download', 'GET', container, blob);
     return Buffer.from(await response.arrayBuffer());
   }
 
   async delete(container: string, blob: string) {
-    await this.request('DELETE', container, blob);
+    await this.request('delete', 'DELETE', container, blob);
   }
 
   async tags(container: string, blob: string) {
-    const response = await this.request('GET', container, blob, { comp: 'tags' });
+    const response = await this.request('read tags', 'GET', container, blob, { comp: 'tags' });
     const xml = await response.text();
     const tags: Record<string, string> = {};
     for (const match of xml.matchAll(/<Tag>\s*<Key>([\s\S]*?)<\/Key>\s*<Value>([\s\S]*?)<\/Value>\s*<\/Tag>/g)) {
@@ -46,6 +57,7 @@ export class BlobRestService {
   }
 
   private async request(
+    operation: string,
     method: string,
     container: string,
     blob: string,
@@ -76,9 +88,8 @@ export class BlobRestService {
     });
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
-      throw new ServiceUnavailableException(
-        `Azure Blob Storage returned ${response.status}${detail ? `: ${detail.slice(0, 240)}` : ''}`,
-      );
+      const code = response.headers.get('x-ms-error-code') ?? detail.match(/<Code>([^<]+)<\/Code>/)?.[1] ?? '';
+      throw new BlobStorageError(operation, response.status, code);
     }
     return response;
   }
