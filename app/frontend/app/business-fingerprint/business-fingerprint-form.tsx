@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, ReactNode, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import gsap from "gsap";
 import { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -61,6 +62,80 @@ const problemStatementStorageKey = "stratveda-problem-statement-draft";
 type PersonalProfile = { name: string; email: string };
 type InterviewMessage = { role: 'user' | 'assistant'; content: string; createdAt?: string };
 type InterviewState = { status: 'pending' | 'active' | 'complete'; messages: InterviewMessage[]; pendingMessage?: string; canRetry?: boolean };
+
+const greetingMessage: InterviewMessage = {
+  role: "assistant",
+  content: "What decision or problem is taking up the most attention right now? Share what is happening, what you have tried, and what a useful outcome would look like.",
+};
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
+function userDisplayName(name: string) {
+  return name.trim() || "You";
+}
+
+function userInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "U";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] ?? ""}${parts[parts.length - 1][0] ?? ""}`.toUpperCase();
+}
+
+function ThreadMessage({ message, userName, index }: { message: InterviewMessage; userName: string; index: number }) {
+  const messageRef = useRef<HTMLElement>(null);
+  const isUser = message.role === "user";
+
+  useIsomorphicLayoutEffect(() => {
+    const element = messageRef.current;
+    if (!element || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const delay = Math.min(index * 0.045, 0.32);
+    const context = gsap.context(() => {
+      const timeline = gsap.timeline({ delay });
+      timeline.from(element, { opacity: 0, y: 14, scale: 0.985, duration: 0.4, ease: "power2.out" });
+      timeline.from(element.querySelector("[data-interview-name]"), { opacity: 0, y: 6, duration: 0.3, ease: "power2.out" }, "-=0.14");
+      timeline.from(element.querySelector("[data-interview-avatar]"), { opacity: 0, scale: 0.4, duration: 0.45, ease: "back.out(1.8)" }, "-=0.08");
+    }, element);
+    return () => context.revert();
+  }, [index]);
+
+  return (
+    <article ref={messageRef} className={`interview-message is-${message.role}`}>
+      <span className="interview-message-avatar" data-interview-avatar aria-hidden="true">
+        {isUser ? userInitials(userName) : "S"}
+      </span>
+      <div className="interview-message-body">
+        <div className="interview-message-meta">
+          <span className="interview-message-name" data-interview-name>{isUser ? userDisplayName(userName) : "StratVeda"}</span>
+          <span className="interview-message-role">{isUser ? "You" : "Discovery agent"}</span>
+        </div>
+        <p className="interview-message-bubble">{message.content}</p>
+      </div>
+    </article>
+  );
+}
+
+function AgentTypingIndicator() {
+  const typingRef = useRef<HTMLDivElement>(null);
+
+  useIsomorphicLayoutEffect(() => {
+    if (!typingRef.current || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const context = gsap.context(() => {
+      gsap.to(".interview-typing-dot", { y: -4, opacity: 1, duration: 0.34, ease: "sine.inOut", repeat: -1, yoyo: true, stagger: 0.12 });
+    }, typingRef);
+    return () => context.revert();
+  }, []);
+
+  return (
+    <div ref={typingRef} className="interview-typing" role="status" aria-label="StratVeda is typing">
+      <span className="interview-message-avatar" aria-hidden="true">S</span>
+      <div className="interview-typing-bubble">
+        <span className="interview-typing-dots" aria-hidden="true">
+          <i className="interview-typing-dot" /><i className="interview-typing-dot" /><i className="interview-typing-dot" />
+        </span>
+        <span className="interview-typing-label">StratVeda is typing…</span>
+      </div>
+    </div>
+  );
+}
 
 function FieldIconLabel({ htmlFor, icon, children }: { htmlFor: string; icon: IconDefinition; children: ReactNode }) {
   return (
@@ -258,6 +333,9 @@ export function BusinessFingerprintForm() {
   const [notice, setNotice] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isInterviewLoading, setIsInterviewLoading] = useState(false);
+  const studioRef = useRef<HTMLDivElement>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
+  const messageCount = interview ? interview.messages.length : 1;
 
   useEffect(() => {
     let active = true;
@@ -309,6 +387,25 @@ export function BusinessFingerprintForm() {
       .catch((error) => { if (active && !draft) setNotice(error instanceof Error ? error.message : "Saved onboarding details could not be loaded."); });
     return () => { active = false; };
   }, []);
+
+  useIsomorphicLayoutEffect(() => {
+    if (step !== 2) return;
+    const studio = studioRef.current;
+    if (!studio || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const context = gsap.context(() => {
+      gsap.from(".interview-column", { opacity: 0, y: 18, duration: 0.5, stagger: 0.08, ease: "power3.out" });
+      gsap.from(".interview-agent-avatar", { opacity: 0, scale: 0.4, rotate: -12, duration: 0.6, delay: 0.1, ease: "back.out(1.6)" });
+    }, studio);
+    return () => context.revert();
+  }, [step]);
+
+  useEffect(() => {
+    if (step !== 2) return;
+    const thread = threadRef.current;
+    if (!thread) return;
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+    thread.scrollTo({ top: thread.scrollHeight, behavior });
+  }, [messageCount, isInterviewLoading, step]);
 
   const update = (field: keyof BusinessDetails, value: string) => {
     const nextDetails = { ...details, [field]: value };
@@ -396,6 +493,7 @@ export function BusinessFingerprintForm() {
 
     setIsInterviewLoading(true);
     setNotice("");
+    const requestStartedAt = Date.now();
     try {
       const response = await fetch(`${API_BASE}/onboarding/problem-interview/${isStarting ? "start" : "message"}`, {
         method: "POST",
@@ -405,6 +503,8 @@ export function BusinessFingerprintForm() {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(Array.isArray(result.message) ? result.message.join(" ") : result.message ?? "The discovery interview could not be reached.");
+      const elapsed = Date.now() - requestStartedAt;
+      if (elapsed < 600) await new Promise((resolve) => setTimeout(resolve, 600 - elapsed));
       setInterview(result.data as InterviewState);
       setInterviewReply("");
       if (isStarting) {
@@ -436,19 +536,24 @@ export function BusinessFingerprintForm() {
     }
   };
 
+  const agentStatus = isInterviewLoading ? "typing" : interview?.status === "complete" ? "complete" : interview?.status === "pending" ? "paused" : interview ? "listening" : "ready";
+  const agentStatusLabel = isInterviewLoading ? "Typing…" : interview?.status === "complete" ? "Interview complete" : interview?.status === "pending" ? "Paused — retry available" : interview ? "Listening to you" : "Ready to listen";
+  const primaryDisabled = isSaving || isInterviewLoading || Boolean(step === 2 && interview && (interview.status === "active" || (interview.status === "pending" && interview.canRetry !== true)) && !interviewReply.trim());
+  const canComposeReply = Boolean(interview && (interview.status === "active" || (interview.status === "pending" && interview.canRetry !== true)));
+
   return (
-    <section className="fingerprint-shell" aria-labelledby="fingerprint-title">
+    <section className={`fingerprint-shell${step === 2 ? " is-interview" : ""}`} aria-labelledby="fingerprint-title">
       <div className="fingerprint-heading">
         <p className="fingerprint-eyebrow">STEP {step} OF 2</p>
-        <h1 id="fingerprint-title">{step === 1 ? "Personal and company details" : "Your problem statement"}</h1>
-        <p className="fingerprint-intro">{step === 1 ? "Confirm your signup details, then tell us about your company." : "Start with the decision or challenge you want to work through."}</p>
+        <h1 id="fingerprint-title">{step === 1 ? "Personal and company details" : "Discovery interview"}</h1>
+        <p className="fingerprint-intro">{step === 1 ? "Confirm your signup details, then tell us about your company." : "Talk it through with the discovery agent. Your answers are saved as you go."}</p>
       </div>
 
       <div className="fingerprint-progress" aria-label={`Step ${step} of 2`}>
         <span className={step === 1 ? "is-current" : "is-complete"}/><span className={step === 2 ? "is-current" : ""}/>
       </div>
 
-      <form className="fingerprint-form" noValidate onSubmit={handleContinue}>
+      <form className={`fingerprint-form${step === 2 ? " is-interview-form" : ""}`} noValidate onSubmit={handleContinue}>
         {step === 1 ? <div className="fingerprint-fields">
           <section className="fingerprint-form-section fingerprint-personal-section" aria-labelledby="personal-details-heading">
             <div className="fingerprint-section-heading"><div><h2 id="personal-details-heading">Personal details</h2><p>These details come from your signup profile.</p></div></div>
@@ -493,43 +598,114 @@ export function BusinessFingerprintForm() {
             </div>
           </section>
           <LocationFields details={details} errors={errors} update={update} />
-        </div> : <div className="fingerprint-fields fingerprint-problem-step">
-          <section className="fingerprint-form-section" aria-labelledby="problem-statement-heading">
-            <div className="fingerprint-problem-chat-card">
-              <div className="fingerprint-problem-agent-mark" aria-hidden="true">S</div>
-              <div><span className="fingerprint-section-kicker">STRATVEDA INTERVIEW</span><p>What decision or problem is taking up the most attention right now? Share what is happening, what you have tried, and what a useful outcome would look like.</p></div>
+        </div> : <div className="interview-studio" ref={studioRef}>
+          <aside className="interview-column interview-agent-rail" aria-label="Discovery agent">
+            <div className="interview-agent-identity">
+              <span className="interview-agent-avatar" aria-hidden="true">S</span>
+              <div>
+                <strong className="interview-agent-name">StratVeda</strong>
+                <span className="interview-agent-role">Discovery agent</span>
+              </div>
             </div>
+            <div className={`interview-agent-status is-${agentStatus}`}>
+              <i aria-hidden="true" /><span>{agentStatusLabel}</span>
+            </div>
+            <p className="interview-agent-brief">I’ll ask a few focused questions to understand the decision in front of you. Answer in your own words — you can revise before sending.</p>
+            <ol className="interview-agent-steps" aria-label="How the interview works">
+              <li>Share the context</li>
+              <li>Explore the constraints</li>
+              <li>Shape a useful outcome</li>
+            </ol>
+            <div className="interview-agent-tip">
+              <span aria-hidden="true">✦</span>
+              <p>Tip: Include what you’ve tried and what “better” looks like.</p>
+            </div>
+          </aside>
+
+          <section className="interview-column interview-thread-panel" aria-label="Interview conversation">
+            <header className="interview-thread-header">
+              <div>
+                <span className="interview-thread-kicker">Discovery interview</span>
+                <h2>Conversation</h2>
+              </div>
+              <span className="interview-thread-count">{messageCount} {messageCount === 1 ? "message" : "messages"}</span>
+            </header>
+            <div className="interview-thread-scroll" ref={threadRef} aria-live="polite" aria-label="Interview messages">
+              {!interview
+                ? <ThreadMessage message={greetingMessage} userName={profile.name} index={0} />
+                : interview.messages.map((message, index) => (
+                  <ThreadMessage message={message} userName={profile.name} index={index} key={`${message.createdAt ?? "turn"}-${index}`} />
+                ))}
+              {isInterviewLoading && <AgentTypingIndicator />}
+              {interview?.status === "complete" && <div className="interview-thread-complete" role="status"><span aria-hidden="true">✓</span> Interview complete — your answers are saved.</div>}
+            </div>
+          </section>
+
+          <section className="interview-column interview-composer-panel" aria-label="Your answer">
             {!interview ? <>
-              <div className="fingerprint-problem-field-heading">
-                <h2 id="problem-statement-heading">Describe the problem you want help with</h2>
+              <div className="interview-composer-heading">
+                <span className="interview-composer-step">Start here</span>
+                <h2 id="problem-statement-heading">Describe the problem</h2>
                 <p>Include what is happening, what you have tried, and the outcome you want.</p>
               </div>
-              <div className="fingerprint-field">
+              <div className="fingerprint-field interview-composer-field">
                 <label htmlFor="problemStatement">Problem statement</label>
-                <textarea id="problemStatement" rows={7} maxLength={3000} disabled={isInterviewLoading} value={problemStatement} aria-invalid={Boolean(problemStatementError)} aria-describedby={problemStatementError ? "problemStatement-error" : "problemStatement-hint"} onChange={(event) => { setProblemStatement(event.target.value); setProblemStatementError(""); try { sessionStorage.setItem(problemStatementStorageKey, event.target.value); } catch { /* Keep editing if browser storage is unavailable. */ } }} placeholder="For example: We’re growing quickly, but our sales forecasts keep missing the mark. I’d like to understand what is driving the gap and where to focus first." />
-                {problemStatementError ? <span className="fingerprint-error" id="problemStatement-error">{problemStatementError}</span> : <span className="fingerprint-hint" id="problemStatement-hint">Your statement and interview answers are saved to your account. {problemStatement.length}/3,000</span>}
+                <textarea id="problemStatement" rows={7} maxLength={3000} disabled={isInterviewLoading} value={problemStatement} aria-invalid={Boolean(problemStatementError)} aria-describedby={problemStatementError ? "problemStatement-error" : "problemStatement-hint"} onChange={(event) => { setProblemStatement(event.target.value); setProblemStatementError(""); try { sessionStorage.setItem(problemStatementStorageKey, event.target.value); } catch { /* Keep editing if browser storage is unavailable. */ } }} onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="For example: We’re growing quickly, but our sales forecasts keep missing the mark. I’d like to understand what is driving the gap and where to focus first." />
+                {problemStatementError ? <span className="fingerprint-error" id="problemStatement-error">{problemStatementError}</span> : <span className="fingerprint-hint" id="problemStatement-hint">Your statement and interview answers are saved to your account.</span>}
+              </div>
+              <div className="interview-composer-who">
+                <span className="interview-message-avatar" aria-hidden="true">{userInitials(profile.name)}</span>
+                <div><strong>{userDisplayName(profile.name)}</strong><span>Your statement starts the conversation</span></div>
+              </div>
+              <div className="interview-composer-actions">
+                <span className="interview-composer-count">{problemStatement.length}/3,000</span>
+                <button className="fingerprint-continue interview-send" type="submit" disabled={isInterviewLoading}>{isInterviewLoading ? "Connecting…" : <>Start interview <span aria-hidden="true">→</span></>}</button>
+              </div>
+            </> : interview.status === "complete" ? <>
+              <div className="interview-complete-card" role="status">
+                <span className="interview-complete-icon" aria-hidden="true">✓</span>
+                <strong>Interview complete</strong>
+                <p>Your problem statement and answers are saved. Continue to the next setup step to keep building your decision context.</p>
+              </div>
+              <div className="interview-composer-actions">
+                <span className="interview-composer-count">{interview.messages.length} saved {interview.messages.length === 1 ? "message" : "messages"}</span>
+                <button className="fingerprint-continue interview-send" type="submit" disabled={isSaving || isInterviewLoading}>{isInterviewLoading ? "Connecting…" : <>Continue setup <span aria-hidden="true">→</span></>}</button>
+              </div>
+            </> : interview.status === "pending" && interview.canRetry === true ? <>
+              <div className="interview-composer-heading">
+                <span className="interview-composer-step">Paused</span>
+                <h2>Your input is saved</h2>
+                <p>The agent request did not finish. Retry to continue; the saved statement and answers will remain in your account.</p>
+              </div>
+              <div className="interview-retry-card">
+                <span className="interview-retry-icon" aria-hidden="true">!</span>
+                <p>Nothing was lost. Retry the interview when you are ready.</p>
+              </div>
+              <div className="interview-composer-actions">
+                <span className="interview-composer-count">{problemStatement.length}/3,000</span>
+                <button className="fingerprint-continue interview-send" type="submit" disabled={isInterviewLoading}>{isInterviewLoading ? "Connecting…" : <>Retry interview <span aria-hidden="true">→</span></>}</button>
               </div>
             </> : <>
-              <div className="fingerprint-interview-thread" aria-live="polite" aria-label="Discovery interview">
-                {interview.messages.map((message, index) => <article className={`fingerprint-interview-message is-${message.role}`} key={`${message.createdAt ?? "turn"}-${index}`}>
-                  <span>{message.role === "assistant" ? "Discovery agent" : "You"}</span>
-                  <p>{message.content}</p>
-                </article>)}
-                {isInterviewLoading && <p className="fingerprint-interview-thinking" role="status">The discovery agent is thinking…</p>}
+              <div className="interview-composer-heading">
+                <span className="interview-composer-step">{interview.status === "pending" ? "Retry answer" : "Your turn"}</span>
+                <h2>{interview.status === "pending" ? "Review your saved answer" : "Write your answer"}</h2>
+                <p>{interview.status === "pending" ? "The agent request did not finish. Check your answer and retry." : "Be specific — the agent will use this to shape the next question."}</p>
               </div>
-              {interview.status === "pending" && <div className="fingerprint-interview-ready" role="status">
-                <span className="fingerprint-interview-ready-icon" aria-hidden="true">…</span>
-                <div><strong>Your input is saved</strong><p>The agent request did not finish. Retry to continue; the saved statement and answers will remain in your account.</p></div>
-              </div>}
-              {(interview.status === "active" || (interview.status === "pending" && interview.canRetry !== true)) && <div className="fingerprint-field">
+              {interview.status === "pending" && <div className="interview-pending-note" role="status"><span aria-hidden="true">!</span><p>Your input is saved. Retrying keeps your answer in your account.</p></div>}
+              <div className="fingerprint-field interview-composer-field">
                 <label htmlFor="interviewReply">{interview.status === "pending" ? "Saved answer (edit before retrying)" : "Your answer"}</label>
-                <textarea id="interviewReply" rows={4} maxLength={4000} disabled={isInterviewLoading} value={interviewReply} onChange={(event) => setInterviewReply(event.target.value)} placeholder="Share any details that will help the agent understand your situation." />
-              </div>}
-              {interview.status === "complete" && <div className="fingerprint-interview-ready" role="status">
-                <span className="fingerprint-interview-ready-icon" aria-hidden="true">✓</span>
-                <div><strong>Interview complete</strong><p>Your problem statement and answers are saved. Continue to the next setup step.</p></div>
-              </div>}
+                <textarea id="interviewReply" rows={4} maxLength={4000} disabled={isInterviewLoading} value={interviewReply} onChange={(event) => setInterviewReply(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="Share any details that will help the agent understand your situation." />
+              </div>
+              <div className="interview-composer-who">
+                <span className="interview-message-avatar" aria-hidden="true">{userInitials(profile.name)}</span>
+                <div><strong>{userDisplayName(profile.name)}</strong><span>Your answer appears in the conversation</span></div>
+              </div>
+              <div className="interview-composer-actions">
+                <span className="interview-composer-count">{interviewReply.length}/4,000</span>
+                <button className="fingerprint-continue interview-send" type="submit" disabled={primaryDisabled}>{isInterviewLoading ? "Connecting…" : interview.status === "pending" ? <>Retry answer <span aria-hidden="true">→</span></> : <>Send answer <span aria-hidden="true">→</span></>}</button>
+              </div>
             </>}
+            {canComposeReply && <span className="interview-composer-hint">Ctrl / ⌘ + Enter to send</span>}
           </section>
         </div>}
 
@@ -537,8 +713,8 @@ export function BusinessFingerprintForm() {
           <p className={notice.startsWith("Check") ? "fingerprint-notice is-error" : "fingerprint-notice"} role="status" aria-live="polite">{notice}</p>
           <div className="fingerprint-form-actions">
             {step === 1 && <button className="fingerprint-save-exit" type="button" onClick={() => void handleSaveAndExit()} disabled={isSaving}>{isSaving ? "Saving…" : "Save & Exit"}</button>}
-            {step > 1 && <button className="fingerprint-save-exit" type="button" onClick={() => { setStep(1); setNotice(""); }}>Back</button>}
-            <button className="fingerprint-continue" type="submit" disabled={isSaving || isInterviewLoading || Boolean(step === 2 && interview && (interview.status === "active" || (interview.status === "pending" && interview.canRetry !== true)) && !interviewReply.trim())}>{step === 1 && isSaving ? "Saving…" : isInterviewLoading ? "Connecting…" : step === 2 && interview?.status === "pending" && interview.canRetry ? <>Retry interview <span aria-hidden="true">→</span></> : step === 2 && interview?.status === "pending" ? <>Retry answer <span aria-hidden="true">→</span></> : step === 2 && interview?.status === "active" ? <>Send answer <span aria-hidden="true">→</span></> : step === 2 && interview?.status === "complete" ? <>Continue setup <span aria-hidden="true">→</span></> : step === 2 ? <>Start interview <span aria-hidden="true">→</span></> : <>Continue <span aria-hidden="true">→</span></>}</button>
+            {step > 1 && <button className="fingerprint-save-exit" type="button" onClick={() => { setStep(1); setNotice(""); }} disabled={isInterviewLoading}>Back</button>}
+            {step === 1 && <button className="fingerprint-continue" type="submit" disabled={isSaving}>{isSaving ? "Saving…" : <>Continue <span aria-hidden="true">→</span></>}</button>}
           </div>
         </div>
       </form>
