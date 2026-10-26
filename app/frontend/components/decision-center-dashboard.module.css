@@ -27,12 +27,44 @@
 
 /* Decision brief */
 
-.brief {
+/* One card holds the brief and, once opened, the chat beside it. */
+.card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid #d7e6db;
   border-radius: 20px;
   background: #fff;
   box-shadow: 0 18px 50px rgba(34, 88, 63, 0.08);
+}
+
+.card.isSplit {
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 460px);
+  height: clamp(620px, calc(100svh - 230px), 900px);
+}
+
+.briefColumn {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.isSplit .briefColumn {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #c9d6cc transparent;
+}
+
+.isSplit .briefHeader {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.isSplit .briefBody :global(.decision-center-agent-text) {
+  font-size: 15px;
 }
 
 .briefHeader {
@@ -44,9 +76,17 @@
   background: linear-gradient(180deg, #f7fbf8, #fff);
 }
 
-.briefHeader > div {
+.briefHeader > div:not(.briefHeaderActions) {
   flex: 1;
   min-width: 0;
+}
+
+.briefHeaderActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .briefHeader h2 {
@@ -216,15 +256,16 @@
   outline-offset: 2px;
 }
 
-/* Ask call-to-action */
+/* Ask call-to-action at the foot of the brief */
 
 .askCta {
   display: flex;
   align-items: center;
   gap: 18px;
-  padding: 22px 26px;
-  border: 1px solid #d7e6db;
-  border-radius: 20px;
+  margin: 0 28px 28px;
+  padding: 18px 20px;
+  border: 1px solid #dce8df;
+  border-radius: 16px;
   background:
     radial-gradient(circle at 0% 0%, rgba(84, 153, 108, 0.12), transparent 45%),
     linear-gradient(160deg, #f6fbf7, #fff);
@@ -265,13 +306,34 @@
 .chat {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  min-height: 520px;
-  max-height: min(78vh, 760px);
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
-  border: 1px solid #d7e6db;
-  border-radius: 20px;
+  border-left: 1px solid #e3ece6;
+  background: #fcfdfc;
+}
+
+.iconButton {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #dce6df;
+  border-radius: 10px;
+  color: #3f5c49;
   background: #fff;
-  box-shadow: 0 18px 50px rgba(34, 88, 63, 0.08);
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.iconButton:hover {
+  border-color: #b8cbbd;
+  background: #f6faf7;
+}
+
+.iconButton:focus-visible {
+  outline: 3px solid rgba(55, 123, 89, 0.3);
+  outline-offset: 2px;
 }
 
 .chatHeader {
@@ -361,7 +423,7 @@
 
 .suggestions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   width: min(720px, 100%);
 }
@@ -416,7 +478,7 @@
 
 .bubble {
   min-width: 0;
-  max-width: min(680px, 86%);
+  max-width: 88%;
   padding: 13px 17px;
   border: 1px solid #e0eae3;
   border-radius: 4px 16px 16px 16px;
@@ -574,6 +636,27 @@
   50% { transform: translateY(-4px); opacity: 1; }
 }
 
+@media (max-width: 1100px) {
+  .card.isSplit {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .isSplit .briefColumn {
+    overflow: visible;
+  }
+
+  .isSplit .briefHeader {
+    position: static;
+  }
+
+  .chat {
+    height: min(82svh, 720px);
+    border-top: 1px solid #e3ece6;
+    border-left: 0;
+  }
+}
+
 @media (max-width: 760px) {
   .briefHeader,
   .briefBody {
@@ -599,13 +682,10 @@
   .askCta {
     flex-direction: column;
     align-items: stretch;
-    padding: 20px 18px;
+    margin: 0 18px 22px;
+    padding: 18px 16px;
   }
 
-  .chat {
-    min-height: 480px;
-    max-height: 82vh;
-  }
 
   .chatHeader {
     flex-wrap: wrap;
