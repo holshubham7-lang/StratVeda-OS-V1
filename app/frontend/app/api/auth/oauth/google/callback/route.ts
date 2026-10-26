@@ -13,9 +13,10 @@ async function postSignupRoute(cookie?: string) {
     if (!response.ok) return "/business-fingerprint";
     const result = await response.json() as { nextRoute?: unknown };
     const route = result.nextRoute;
-    return typeof route === "string" && route.startsWith("/") && !route.startsWith("//")
-      ? route
-      : "/business-fingerprint";
+    if (typeof route !== "string" || !route.startsWith("/") || route.startsWith("//")) return "/business-fingerprint";
+    // Only the two business fingerprint steps gate login. Anyone past them is
+    // an existing user and lands in the Decision Center.
+    return route === "/business-fingerprint" ? "/business-fingerprint" : "/decision-center";
   } catch {
     return "/business-fingerprint";
   }
