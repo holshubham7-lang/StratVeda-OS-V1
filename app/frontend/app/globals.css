@@ -787,6 +787,8 @@ html.motion-ready .question-card:nth-child(4).is-visible { animation-delay: 210m
 .interview-message-role { color: #93a198; font-size: 8.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .interview-message-bubble { margin: 6px 0 0; padding: 12px 15px; border: 1px solid #dfe9e1; border-radius: 4px 14px 14px 14px; color: #34483a; background: #f8fbf8; font-size: 12.5px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .interview-message.is-user .interview-message-bubble { border-color: #d5e6da; border-radius: 14px 4px 14px 14px; background: #eef6f0; }
+.interview-message-bubble-markdown { white-space: normal; }
+.interview-message-bubble-markdown .decision-center-agent-text { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: inherit; font-size: inherit; line-height: inherit; }
 .interview-typing { align-self: flex-start; display: flex; align-items: center; gap: 10px; }
 .interview-typing-bubble { display: flex; align-items: center; gap: 9px; padding: 10px 14px; border: 1px solid #dfe9e1; border-radius: 4px 14px 14px 14px; background: #f8fbf8; }
 .interview-typing-dots { display: flex; align-items: center; gap: 4px; }

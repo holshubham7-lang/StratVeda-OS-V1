@@ -20,6 +20,7 @@ import {
   faUsers,
 } from "@fortawesome/free-solid-svg-icons";
 import { beginOnboardingTransition } from "../../components/onboarding-route-transition";
+import { AgentOutput } from "../../components/agent-output";
 import { setFlashNotice } from "../../components/feedback-toast";
 import { countryPhoneCodes } from "./country-phone-codes";
 
@@ -107,7 +108,9 @@ function ThreadMessage({ message, userName, index }: { message: InterviewMessage
           <span className="interview-message-name" data-interview-name>{isUser ? userDisplayName(userName) : "StratVeda"}</span>
           <span className="interview-message-role">{isUser ? "You" : "Discovery agent"}</span>
         </div>
-        <p className="interview-message-bubble">{message.content}</p>
+        {isUser
+          ? <p className="interview-message-bubble">{message.content}</p>
+          : <div className="interview-message-bubble interview-message-bubble-markdown"><AgentOutput source={message.content} /></div>}
       </div>
     </article>
   );
