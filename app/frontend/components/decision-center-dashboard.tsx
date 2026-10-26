@@ -1,15 +1,25 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { KeyboardEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
+import gsap from "gsap";
 import { Icon } from "./icon";
 import { AgentOutput } from "./agent-output";
 import { DecisionCenterSidebar } from "./decision-center-sidebar";
 import { WelcomeCopyrightFooter, WelcomeHeader } from "./site-chrome";
+import styles from "./decision-center-dashboard.module.css";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3001/api";
+const THREADS_EVENT = "workspace:threads-changed";
+const MAX_MESSAGE_CHARS = 4000;
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
-type BriefAnswer = { question: string; answer: string };
+const suggestedQuestions = [
+  "What should I do first this week?",
+  "What are the biggest risks in this plan?",
+  "Which data would make this brief stronger?",
+  "Explain the first decision focus in simple terms.",
+];
 
 type BriefGeneration = {
   status?: string;
@@ -21,26 +31,24 @@ type BriefGeneration = {
 
 type CenterData = {
   companyName: string;
-  industry: string;
-  objective: string;
-  constraint: string;
-  domains: string[];
-  evidenceCount: number;
-  answers: BriefAnswer[];
   generation: BriefGeneration | null;
   masterResponse: string;
+  masterCompletedAt: string;
+};
+
+type ChatMessage = {
+  role: string;
+  content: string;
+  status?: string;
+  error?: string;
+  createdAt: string;
 };
 
 const emptyData: CenterData = {
   companyName: "your business",
-  industry: "",
-  objective: "Not set yet",
-  constraint: "Not set yet",
-  domains: [],
-  evidenceCount: 0,
-  answers: [],
   generation: null,
   masterResponse: "",
+  masterCompletedAt: "",
 };
 
 async function apiJson(path: string, init?: RequestInit) {
@@ -58,81 +66,51 @@ async function settle<T>(promise: Promise<T>): Promise<T | null> {
   return promise.catch(() => null);
 }
 
-function toStringArray(source: unknown): string[] {
-  return Array.isArray(source) ? source.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
+function formatDate(value: string | undefined) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
-function toBriefAnswers(source: unknown): BriefAnswer[] {
-  if (!Array.isArray(source)) return [];
-  const answers: BriefAnswer[] = [];
-  for (const entry of source) {
-    const record = (entry ?? {}) as { question?: unknown; answer?: unknown };
-    if (typeof record.question === "string" && typeof record.answer === "string") answers.push({ question: record.question, answer: record.answer });
-  }
-  return answers;
+function prefersReducedMotion() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-const BRIEF_PREVIEW_CHARS = 300;
-
-/** Markdown with its structural markers removed, for the short preview line on the card. */
-function plainBriefText(source: string): string {
-  return source
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((line) => line
-      .replace(/^\s*(?:#{1,6}|[-*+]|\d+[.)])\s+/, "")
-      .replace(/\*\*(.+?)\*\*/g, "$1")
-      .replace(/\*([^*\n]+)\*/g, "$1")
-      .replace(/`(.+?)`/g, "$1")
-      .trim())
-    .filter((line) => line && !/^(?:---|___|\*\*\*)$/.test(line))
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function truncateBriefText(text: string, max: number): string {
-  if (text.length <= max) return text;
-  const slice = text.slice(0, max);
-  const lastSpace = slice.lastIndexOf(" ");
-  const cut = lastSpace > max * 0.6 ? slice.slice(0, lastSpace) : slice;
-  return `${cut.replace(/[,;:.\s]+$/, "")}…`;
-}
-
-export function DecisionCenterDashboard({ showChatPanel = false }: { showChatPanel?: boolean }) {
+/** `startWithChat` opens the ask panel straight away (the legacy /chat route). */
+export function DecisionCenterDashboard({ startWithChat = false }: { startWithChat?: boolean }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const chatRef = useRef<HTMLElement>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const renderedCount = useRef(0);
   const [data, setData] = useState(emptyData);
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [briefMessage, setBriefMessage] = useState("");
-  const [isBriefOpen, setIsBriefOpen] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(startWithChat);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [threadId, setThreadId] = useState("");
+  const [draft, setDraft] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [chatNotice, setChatNotice] = useState("");
 
   const load = useCallback(async () => {
-    const [business, context, profile, evidence, brief, intake] = await Promise.all([
+    const [business, brief, intake] = await Promise.all([
       settle(apiJson("/onboarding/business-details")),
-      settle(apiJson("/onboarding/strategic-context")),
-      settle(apiJson("/onboarding/decision-profile")),
-      settle(apiJson("/onboarding/evidence-library")),
       settle(apiJson("/onboarding/executive-brief")),
       settle(apiJson("/data-intake")),
     ]);
 
-    const company = (business?.data ?? {}) as { companyName?: string; industry?: string };
-    const strategic = (context?.data ?? {}) as { primaryObjective?: string; biggestConstraint?: string };
-    const decisionProfile = (profile?.data ?? {}) as { decisionDomains?: unknown };
-    const files = Array.isArray(evidence?.data) ? evidence.data : [];
-    const savedBrief = (brief?.data ?? {}) as { answers?: unknown; generation?: BriefGeneration };
-    const dataIntake = (intake?.data ?? {}) as { masterResponse?: unknown };
+    const company = (business?.data ?? {}) as { companyName?: string };
+    const savedBrief = (brief?.data ?? {}) as { generation?: BriefGeneration };
+    const dataIntake = (intake?.data ?? {}) as { masterResponse?: unknown; completedAt?: unknown };
 
     setData({
       companyName: company.companyName?.trim() || emptyData.companyName,
-      industry: company.industry || "",
-      objective: strategic.primaryObjective || emptyData.objective,
-      constraint: strategic.biggestConstraint || emptyData.constraint,
-      domains: toStringArray(decisionProfile.decisionDomains),
-      evidenceCount: files.length,
-      answers: toBriefAnswers(savedBrief.answers),
       generation: savedBrief.generation ?? null,
       masterResponse: typeof dataIntake.masterResponse === "string" ? dataIntake.masterResponse.trim() : "",
+      masterCompletedAt: typeof dataIntake.completedAt === "string" ? dataIntake.completedAt : "",
     });
     setIsLoading(false);
   }, []);
@@ -140,6 +118,57 @@ export function DecisionCenterDashboard({ showChatPanel = false }: { showChatPan
   useEffect(() => {
     void load();
   }, [load]);
+
+  useIsomorphicLayoutEffect(() => {
+    if (!rootRef.current || prefersReducedMotion()) return;
+    const context = gsap.context(() => {
+      gsap.timeline({ defaults: { ease: "power3.out" } })
+        .from("[data-center-heading] > *", { opacity: 0, y: 14, duration: 0.5, stagger: 0.07 })
+        .from("[data-center-brief]", { opacity: 0, y: 20, duration: 0.6 }, "-=0.25")
+        .from("[data-center-ask]", { opacity: 0, y: 16, duration: 0.5 }, "-=0.3");
+    }, rootRef);
+    return () => context.revert();
+  }, []);
+
+  // The brief text fades in once it arrives, so the card does not pop from a placeholder.
+  useEffect(() => {
+    if (isLoading || !rootRef.current || prefersReducedMotion()) return;
+    const body = rootRef.current.querySelector("[data-center-brief-body]");
+    if (body) gsap.from(body, { opacity: 0, y: 8, duration: 0.5, ease: "power2.out" });
+  }, [isLoading]);
+
+  // Opening the chat unfolds it below the brief and moves focus into the composer.
+  useIsomorphicLayoutEffect(() => {
+    if (!isChatOpen) return;
+    const panel = chatRef.current;
+    if (panel && !prefersReducedMotion() && !startWithChat) {
+      gsap.fromTo(panel, { opacity: 0, y: 18, scale: 0.985 }, { opacity: 1, y: 0, scale: 1, duration: 0.5, ease: "power3.out" });
+      gsap.from(panel.querySelectorAll("[data-chat-suggestion]"), { opacity: 0, y: 8, duration: 0.35, stagger: 0.06, delay: 0.15, ease: "power2.out" });
+    }
+    panel?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "nearest" });
+    inputRef.current?.focus({ preventScroll: true });
+  }, [isChatOpen]);
+
+  // New messages slide in; ones already on screen stay still.
+  useIsomorphicLayoutEffect(() => {
+    const thread = threadRef.current;
+    if (!thread) return;
+    const items = thread.querySelectorAll("[data-chat-message]");
+    const fresh = Array.from(items).slice(renderedCount.current);
+    renderedCount.current = items.length;
+    if (fresh.length && !prefersReducedMotion()) {
+      gsap.from(fresh, { opacity: 0, y: 12, duration: 0.4, stagger: 0.08, ease: "power2.out" });
+    }
+    thread.scrollTo({ top: thread.scrollHeight, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+  }, [messages, isSending]);
+
+  // The composer grows with its text up to a few lines, like a chat app.
+  useEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 200)}px`;
+  }, [draft, isChatOpen]);
 
   const generateBrief = async () => {
     if (isGenerating) return;
@@ -156,143 +185,212 @@ export function DecisionCenterDashboard({ showChatPanel = false }: { showChatPan
     }
   };
 
+  const sendMessage = async (text?: string) => {
+    const message = (text ?? draft).trim();
+    if (message.length < 2 || isSending) return;
+    setIsSending(true);
+    setChatNotice("");
+    const pending: ChatMessage = { role: "user", content: message, createdAt: new Date().toISOString() };
+    setMessages((current) => [...current, pending]);
+    setDraft("");
+    try {
+      const path = threadId ? `/workspace/threads/${threadId}/messages` : "/workspace/threads";
+      const result = await apiJson(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      const thread = result?.data as { id?: string; messages?: ChatMessage[] } | undefined;
+      setThreadId(typeof thread?.id === "string" ? thread.id : "");
+      if (Array.isArray(thread?.messages)) {
+        // Keep already-rendered messages so only the reply animates in.
+        renderedCount.current = Math.min(renderedCount.current, thread.messages.length - 1);
+        setMessages(thread.messages);
+      }
+      window.dispatchEvent(new Event(THREADS_EVENT));
+    } catch (error) {
+      setMessages((current) => current.filter((entry) => entry !== pending));
+      renderedCount.current = Math.max(0, renderedCount.current - 1);
+      setDraft(message);
+      setChatNotice(error instanceof Error ? error.message : "The agent could not answer just now.");
+    } finally {
+      setIsSending(false);
+      inputRef.current?.focus({ preventScroll: true });
+    }
+  };
+
+  const startNewChat = () => {
+    if (isSending) return;
+    renderedCount.current = 0;
+    setMessages([]);
+    setThreadId("");
+    setDraft("");
+    setChatNotice("");
+    inputRef.current?.focus();
+  };
+
+  const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      void sendMessage();
+    }
+  };
+
   const generation = data.generation;
   // The Master Agent's onboarding handover is the brief once it exists; the brief
   // agent's generation is the fallback for users who have not reached it.
   const briefFromMaster = Boolean(data.masterResponse);
   const briefIsReady = briefFromMaster || (generation?.status === "ok" && Boolean(generation.content));
   const briefSource = briefFromMaster ? data.masterResponse : generation?.content ?? "";
-  const briefAgentLabel = briefFromMaster ? "GENERATED BY YOUR MASTER AGENT" : "GENERATED BY YOUR BRIEF AGENT";
-  const briefPlain = plainBriefText(briefSource);
-  const briefNeedsExpansion = briefPlain.length > BRIEF_PREVIEW_CHARS;
+  const briefDate = formatDate(briefFromMaster ? data.masterCompletedAt : generation?.generatedAt);
+  const canSend = draft.trim().length >= 2 && !isSending;
 
   return (
     <>
       <a className="skip-link" href="#decision-center-main">Skip to content</a>
       <WelcomeHeader />
-      <div className={`decision-center-layout${showChatPanel ? " has-chat-panel" : ""}`}>
+      <div className="decision-center-layout">
         <DecisionCenterSidebar />
 
-        <main id="decision-center-main" className="decision-center-main">
-          <div className="decision-center-heading">
+        <main id="decision-center-main" className={`decision-center-main ${styles.main}`} ref={rootRef}>
+          <div className="decision-center-heading" data-center-heading>
             <div>
               <p className="decision-center-eyebrow">STRATVEDA <span>·</span> DECISION CENTER</p>
               <h1>Welcome to your Decision Center</h1>
-              <p>{isLoading ? "Loading your saved context…" : `Your business context is ready. Start with what matters most to ${data.companyName}.`}</p>
+              <p>{isLoading ? "Loading your saved context…" : `Here is your decision brief for ${data.companyName}. Ask your agent anything about it.`}</p>
             </div>
             <Link className="decision-center-edit" href="/business-fingerprint"><Icon name="brain" size={16} /> Review your profile</Link>
           </div>
 
-          <section className="decision-center-agent-brief" aria-labelledby="decision-agent-brief-title">
-            <div className="decision-center-panel-heading">
-              <div><span><Icon name="sparkles" size={14} /> {briefIsReady ? briefAgentLabel : "BRIEF AGENT"}</span><h2 id="decision-agent-brief-title">Your decision brief</h2></div>
+          <section className={styles.brief} aria-labelledby="decision-agent-brief-title" data-center-brief>
+            <header className={styles.briefHeader}>
+              <span className={styles.briefMark} aria-hidden="true"><Icon name="sparkles" size={18} /></span>
+              <div>
+                <span className={styles.kicker}>{briefIsReady ? (briefFromMaster ? "GENERATED BY YOUR MASTER AGENT" : "GENERATED BY YOUR BRIEF AGENT") : "BRIEF AGENT"}</span>
+                <h2 id="decision-agent-brief-title">Your decision brief</h2>
+              </div>
               {briefIsReady
-                ? <span className="decision-center-saved-badge"><Icon name="check" size={13} /> {briefFromMaster ? "MASTER AGENT" : generation?.agent || "AGENT OUTPUT"}</span>
-                : <button className="decision-center-agent-retry" type="button" onClick={generateBrief} disabled={isGenerating}>{isGenerating ? "Generating…" : generation?.status === "failed" ? "Retry brief" : "Generate brief" }</button>}
+                ? <span className={styles.badge}><Icon name="check" size={13} /> {briefDate ? `Ready · ${briefDate}` : "Ready"}</span>
+                : <button className={styles.secondaryButton} type="button" onClick={generateBrief} disabled={isGenerating || isLoading}>{isGenerating ? "Generating…" : generation?.status === "failed" ? "Retry brief" : "Generate brief"}</button>}
+            </header>
+
+            <div className={styles.briefBody} data-center-brief-body>
+              {isLoading ? (
+                <div className={styles.skeleton} aria-label="Loading your brief">
+                  <span style={{ width: "92%" }} /><span style={{ width: "84%" }} /><span style={{ width: "88%" }} /><span style={{ width: "62%" }} />
+                </div>
+              ) : briefIsReady ? (
+                <AgentOutput source={briefSource} />
+              ) : (
+                <p className={styles.fallback}>
+                  {briefMessage
+                    || generation?.error
+                    || "Your decision brief is not ready yet. Finish your company data step so the Master Agent can prepare it, or generate one here."}
+                </p>
+              )}
             </div>
-            {isLoading ? (
-              <p className="decision-center-empty-note">Checking whether your brief has already been generated.</p>
-            ) : briefIsReady ? (
-              briefNeedsExpansion ? (
-                <div className="decision-center-agent-preview">
-                  <p>{truncateBriefText(briefPlain, BRIEF_PREVIEW_CHARS)}</p>
-                  <button className="decision-center-agent-read-more" type="button" onClick={() => setIsBriefOpen(true)}>
-                    Read more <Icon name="arrow-right" size={14} />
+          </section>
+
+          {!isChatOpen ? (
+            <section className={styles.askCta} aria-labelledby="ask-agent-title" data-center-ask>
+              <span className={styles.askIcon} aria-hidden="true"><Icon name="chat" size={20} /></span>
+              <div className={styles.askCopy}>
+                <h2 id="ask-agent-title">Have a question about your brief?</h2>
+                <p>Ask your StratVeda agent for more detail, next steps, or anything that is unclear. It already knows your profile, interview and data.</p>
+              </div>
+              <button className={styles.primaryButton} type="button" onClick={() => setIsChatOpen(true)}>
+                <Icon name="sparkles" size={16} /> Ask your agent
+              </button>
+            </section>
+          ) : (
+            <section className={styles.chat} ref={chatRef} aria-labelledby="ask-chat-title" data-center-ask>
+              <header className={styles.chatHeader}>
+                <div className={styles.chatTitle}>
+                  <span className={styles.agentAvatar} aria-hidden="true">S</span>
+                  <div>
+                    <h2 id="ask-chat-title">Ask StratVeda</h2>
+                    <span><i aria-hidden="true" /> Answers from your brief and saved setup</span>
+                  </div>
+                </div>
+                <div className={styles.chatActions}>
+                  {threadId && <Link className={styles.ghostButton} href="/decision-workspace">Open in workspace <Icon name="arrow-up-right" size={14} /></Link>}
+                  <button className={styles.ghostButton} type="button" onClick={startNewChat} disabled={isSending || (!messages.length && !draft)}>
+                    <Icon name="plus" size={14} /> New chat
                   </button>
                 </div>
-              ) : (
-                <AgentOutput source={briefSource} />
-              )
-            ) : (
-              <p className="decision-center-agent-fallback">
-                {briefMessage
-                  || generation?.error
-                  || "Your brief agent has not produced an overview yet. Answer the four questions on your first decision brief, then generate it here."}
-              </p>
-            )}
-          </section>
+              </header>
 
-          <section className="decision-center-focus" aria-labelledby="decision-focus-title">
-            <div className="decision-center-focus-copy">
-              <span className="decision-center-focus-label"><Icon name="sparkles" size={15} /> YOUR CURRENT FOCUS</span>
-              <h2 id="decision-focus-title">{data.objective}</h2>
-              <p>{data.constraint === "Not set yet" ? "Your priorities will guide the insights in this workspace." : `We’ll keep your biggest constraint in view: ${data.constraint}.`}</p>
-            </div>
-            <div className="decision-center-focus-mark" aria-hidden="true"><Icon name="trend" size={28} /></div>
-          </section>
-
-          <section className="decision-center-metrics" aria-label="Workspace summary">
-            <article className="decision-center-metric"><span className="decision-center-metric-icon metric-green"><Icon name="dashboard" size={18} /></span><div><span>DECISION AREAS</span><strong>{data.domains.length}</strong><small>Chosen for your business</small></div></article>
-            <article className="decision-center-metric"><span className="decision-center-metric-icon metric-blue"><Icon name="report" size={18} /></span><div><span>EVIDENCE FILES</span><strong>{data.evidenceCount}</strong><small>{data.evidenceCount ? "Available in your library" : "You can add these any time"}</small></div></article>
-            <article className="decision-center-metric"><span className="decision-center-metric-icon metric-gold"><Icon name="check" size={18} /></span><div><span>SETUP</span><strong>{data.answers.length ? "Complete" : "In progress"}</strong><small>{data.answers.length ? "Your Decision Center is ready" : "Finish your first decision brief to complete it"}</small></div></article>
-          </section>
-
-          <div className="decision-center-content-grid">
-            <section className="decision-center-panel decision-center-areas" aria-labelledby="decision-areas-title">
-              <div className="decision-center-panel-heading"><div><span>YOUR PRIORITIES</span><h2 id="decision-areas-title">Decision areas</h2></div><Link href="/decision-profile">Edit <Icon name="arrow-right" size={15} /></Link></div>
-              {data.domains.length ? (
-                <ul>{data.domains.map((domain, index) => <li key={domain}><span className="decision-center-area-number">{String(index + 1).padStart(2, "0")}</span><span>{domain}</span><Icon name="arrow-right" size={16} /></li>)}</ul>
-              ) : <p className="decision-center-empty-note">Your selected decision areas will appear here.</p>}
-              {data.industry && <p className="decision-center-industry">Built around your work in <strong>{data.industry}</strong></p>}
-            </section>
-
-            <section className="decision-center-panel decision-center-brief" aria-labelledby="decision-brief-title">
-              <div className="decision-center-panel-heading"><div><span>FROM YOUR FIRST DECISION BRIEF</span><h2 id="decision-brief-title">Questions to explore</h2></div><span className="decision-center-saved-badge"><Icon name="check" size={13} /> SAVED</span></div>
-              {data.answers.length ? (
-                <ol>{data.answers.slice(0, 4).map((item, index) => <li key={`${index}-${item.question}`}><span>{index + 1}</span><p><strong>{item.question}</strong>{item.answer}</p></li>)}</ol>
-              ) : <p className="decision-center-empty-note">Your saved questions will appear here.</p>}
-              <Link className="decision-center-brief-link" href="/executive-brief">Open Your First Decision Brief <Icon name="arrow-right" size={15} /></Link>
-            </section>
-          </div>
-
-          <section className="decision-center-data-note" aria-label="Revenue data connection status">
-            <span className="decision-center-data-icon" aria-hidden="true"><Icon name="trend" size={20} /></span>
-            <div><strong>Your revenue overview will grow with you</strong><p>As you connect revenue data, this space can bring your trends and priorities together. Your setup is saved and ready whenever you are.</p></div>
-            <span className="decision-center-data-status"><i /> CONTEXT READY</span>
-          </section>
-        </main>
-        {showChatPanel && (
-          <aside className="decision-center-chat-panel" aria-label="Decision chat preview">
-            <div className="decision-center-chat-head">
-              <div><span>STRATVEDA ASSISTANT</span><h2>Decision chat</h2></div>
-              <span className="decision-center-chat-availability"><i /> Coming soon</span>
-            </div>
-            <div className="decision-center-chat-conversation" aria-live="polite">
-              <div className="decision-center-chat-agent-mark" aria-hidden="true">S</div>
-              <div className="decision-center-chat-message">
-                <span>STRATVEDA</span>
-                <p>Your workspace is ready. When chat is connected, bring a business question here and work through it with your company context in view.</p>
+              <div className={styles.thread} ref={threadRef} aria-live="polite">
+                {!messages.length && !isSending ? (
+                  <div className={styles.empty}>
+                    <strong>What would you like to know?</strong>
+                    <p>Pick a starting point or write your own question below.</p>
+                    <div className={styles.suggestions}>
+                      {suggestedQuestions.map((question) => (
+                        <button key={question} type="button" data-chat-suggestion onClick={() => void sendMessage(question)}>
+                          {question} <Icon name="arrow-right" size={13} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <ol className={styles.messages}>
+                    {messages.map((message, index) => {
+                      const isUser = message.role === "user";
+                      return (
+                        <li className={`${styles.message} ${isUser ? styles.isUser : styles.isAgent}`} key={`${message.createdAt}-${index}`} data-chat-message>
+                          {!isUser && <span className={styles.agentAvatar} aria-hidden="true">S</span>}
+                          <div className={styles.bubble}>
+                            {isUser
+                              ? <p>{message.content}</p>
+                              : message.status === "failed"
+                                ? <p className={styles.failed}>The agent could not answer this one{message.error ? `: ${message.error}` : "."} Try asking again.</p>
+                                : <AgentOutput source={message.content} />}
+                          </div>
+                        </li>
+                      );
+                    })}
+                    {isSending && (
+                      <li className={`${styles.message} ${styles.isAgent}`} data-chat-message>
+                        <span className={styles.agentAvatar} aria-hidden="true">S</span>
+                        <div className={`${styles.bubble} ${styles.typing}`} role="status" aria-label="StratVeda is thinking">
+                          <i /><i /><i /><span>Thinking about your brief…</span>
+                        </div>
+                      </li>
+                    )}
+                  </ol>
+                )}
               </div>
-              <div className="decision-center-chat-context"><span>YOUR CONTEXT</span><p>{data.companyName}{data.industry ? ` · ${data.industry}` : ""}</p></div>
-            </div>
-            <div className="decision-center-chat-compose">
-              <label className="sr-only" htmlFor="decision-chat-message">Write a message</label>
-              <textarea id="decision-chat-message" rows={4} disabled placeholder="Chat will be available here soon…" />
-              <div><span>Context stays with your workspace</span><button type="button" disabled aria-label="Send message">↑</button></div>
-            </div>
-          </aside>
-        )}
+
+              <form className={styles.composerWrap} onSubmit={(event) => { event.preventDefault(); void sendMessage(); }}>
+                {chatNotice && <p className={styles.notice} role="alert">{chatNotice}</p>}
+                <div className={styles.composer}>
+                  <label className={styles.srOnly} htmlFor="decision-center-question">Ask about your decision brief</label>
+                  <textarea
+                    id="decision-center-question"
+                    ref={inputRef}
+                    rows={1}
+                    maxLength={MAX_MESSAGE_CHARS}
+                    value={draft}
+                    disabled={isSending}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onKeyDown={onComposerKeyDown}
+                    placeholder="Ask about your brief, a next step, or a risk…"
+                  />
+                  <button className={styles.send} type="submit" disabled={!canSend} aria-label="Send question">
+                    <Icon name="arrow-up" size={18} />
+                  </button>
+                </div>
+                <p className={styles.composerHint}>
+                  <span>Enter to send · Shift + Enter for a new line</span>
+                  {draft.length > MAX_MESSAGE_CHARS * 0.8 && <span>{draft.length}/{MAX_MESSAGE_CHARS}</span>}
+                </p>
+              </form>
+            </section>
+          )}
+        </main>
       </div>
       <WelcomeCopyrightFooter />
-
-      {isBriefOpen && briefIsReady && (
-        <div className="decision-center-brief-overlay" role="presentation">
-          <div className="decision-center-brief-modal" role="dialog" aria-modal="true" aria-labelledby="decision-brief-modal-title">
-            <div className="decision-center-brief-modal-head">
-              <div>
-                <span><Icon name="sparkles" size={14} /> {briefAgentLabel}</span>
-                <h2 id="decision-brief-modal-title">Your decision brief</h2>
-              </div>
-              <button className="decision-center-brief-modal-close" type="button" onClick={() => setIsBriefOpen(false)} aria-label="Close brief" autoFocus>
-                <Icon name="close" size={16} />
-              </button>
-            </div>
-            <div className="decision-center-brief-modal-body">
-              <AgentOutput source={briefSource} />
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 }

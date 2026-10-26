@@ -70,7 +70,7 @@ function formatDataIntake(intake?: OnboardingDataIntake | null) {
     `Data Agent package status: ${packageStatus || 'received'}`,
     summary ? `Data Agent summary: ${summary.slice(0, 1200)}` : '',
     limitations.length ? `Limitations: ${limitations.join('; ')}` : '',
-    intake.masterResponse ? `Master Agent handover: ${intake.masterResponse.trim().slice(0, 1600)}` : '',
+    intake.masterResponse ? `Master Agent handover: ${intake.masterResponse.trim().slice(0, 6000)}` : '',
   ].filter(Boolean).join('\n');
 }
 
