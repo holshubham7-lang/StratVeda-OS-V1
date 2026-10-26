@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { DataIntakeSession } from '../data-intake/data-intake.schema';
 import { CompanyDetails } from './company-details.schema';
 import { DecisionProfile } from './decision-profile.schema';
 import { EvidenceItem } from './evidence-item.schema';
@@ -33,6 +34,7 @@ export class OnboardingService {
     @InjectModel(EvidenceItem.name) private readonly evidenceItems: Model<EvidenceItem>,
     @InjectModel(ExecutiveBrief.name) private readonly executiveBriefs: Model<ExecutiveBrief>,
     @InjectModel(ProblemInterview.name) private readonly problemInterviews: Model<ProblemInterview>,
+    @InjectModel(DataIntakeSession.name) private readonly dataIntakes: Model<DataIntakeSession>,
   ) {}
 
   async getCompanyDetails(userId: string) {
@@ -129,21 +131,25 @@ export class OnboardingService {
 
   async getProgress(userId: string) {
     const owner = asObjectId(userId);
-    const [hasCompany, problemInterview, hasStrategicContext, hasDecisionProfile] = await Promise.all([
+    const [hasCompany, problemInterview, dataIntake, hasStrategicContext, hasDecisionProfile] = await Promise.all([
       this.companyDetails.exists({ userId: owner }),
       this.problemInterviews.findOne({ userId: owner }).select('status').lean().exec(),
+      this.dataIntakes.findOne({ userId: owner }).select('status').lean().exec(),
       this.strategicContexts.exists({ userId: owner }),
       this.decisionProfiles.exists({ userId: owner }),
     ]);
+    const dataIntakeComplete = dataIntake?.status === 'ready' || dataIntake?.status === 'skipped';
     const nextRoute = !hasCompany
       ? '/business-fingerprint'
       : problemInterview?.status !== 'complete'
         ? '/business-fingerprint'
-        : !hasStrategicContext
-          ? '/strategic-context'
-          : !hasDecisionProfile
-            ? '/decision-profile'
-            : '/executive-brief';
+        : !dataIntakeComplete
+          ? '/data-intake'
+          : !hasStrategicContext
+            ? '/strategic-context'
+            : !hasDecisionProfile
+              ? '/decision-profile'
+              : '/executive-brief';
     return { status: true, nextRoute };
   }
 }

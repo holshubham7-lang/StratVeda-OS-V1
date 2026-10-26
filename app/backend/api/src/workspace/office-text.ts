@@ -11,7 +11,9 @@ const endOfCentralDirectorySignature = 0x06054b50;
 const localHeaderSignature = 0x04034b50;
 
 const maxOOXMLChars = 20000;
+const maxOOXMLBytes = 4 * 1024 * 1024;
 const maxRowsPerSheet = 200;
+const maxSheets = 25;
 
 type ZipEntry = { name: string; method: number; size: number; offset: number };
 
@@ -50,7 +52,7 @@ function bytesOf(buffer: Buffer, entry: ZipEntry): Buffer | undefined {
   if (entry.method === 0) return slice;
   if (entry.method !== 8) return undefined;
   try {
-    return inflateRawSync(slice);
+    return inflateRawSync(slice, { maxOutputLength: maxOOXMLBytes });
   } catch {
     return undefined;
   }
@@ -102,7 +104,7 @@ function sheetOrder(buffer: Buffer, list: ZipEntry[]): { name: string; path: str
 function workbookText(buffer: Buffer, list: ZipEntry[]): string {
   const stringsEntry = list.find((entry) => entry.name === 'xl/sharedStrings.xml');
   const strings = sharedStrings(stringsEntry ? bytesOf(buffer, stringsEntry) : undefined);
-  const sheetEntries = list.filter((entry) => /^xl\/worksheets\/[\w\-. ]+\.xml$/.test(entry.name));
+  const sheetEntries = list.filter((entry) => /^xl\/worksheets\/[\w\-. ]+\.xml$/.test(entry.name)).slice(0, maxSheets);
   const byPath = new Map(sheetEntries.map((entry) => [entry.name, entry]));
   const order = sheetOrder(buffer, list);
   const ordered = order.length

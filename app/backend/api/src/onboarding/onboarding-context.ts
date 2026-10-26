@@ -1,9 +1,16 @@
+export type OnboardingDataIntake = {
+  status?: string | null;
+  evidencePackageText?: string | null;
+  masterResponse?: string | null;
+};
+
 export type OnboardingContextData = {
   company: Record<string, unknown> | null;
   context: Record<string, unknown> | null;
   profile: Record<string, unknown> | null;
   evidence: Record<string, unknown>[];
   brief: Record<string, unknown> | null;
+  dataIntake?: OnboardingDataIntake | null;
 };
 
 function stringifyValue(value: unknown): string {
@@ -16,6 +23,55 @@ function formatSize(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return 'unknown size';
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function parseJson(text?: string | null) {
+  if (!text) return null;
+  const trimmed = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+  } catch {
+    const start = trimmed.indexOf('{');
+    const end = trimmed.lastIndexOf('}');
+    if (start < 0 || end <= start) return null;
+    try {
+      const parsed = JSON.parse(trimmed.slice(start, end + 1));
+      return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+function firstText(payload: Record<string, unknown> | null, keys: string[]) {
+  if (!payload) return '';
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function formatDataIntake(intake?: OnboardingDataIntake | null) {
+  if (!intake) return 'No company-data stage has been completed yet.';
+  if (intake.status === 'skipped') return 'The customer skipped the optional company-data stage.';
+  if (intake.status === 'failed') return 'The customer\'s optional company-data stage did not finish, so its evidence package is unavailable.';
+  if (intake.status !== 'ready') return 'The customer has an optional company-data stage in progress.';
+
+  const evidence = parseJson(intake.evidencePackageText);
+  const packageStatus = firstText(evidence, ['package_status', 'packageStatus', 'status', 'readiness']);
+  const summary = firstText(evidence, ['summary', 'executive_summary', 'evidence_summary', 'overview']);
+  const limitations = Array.isArray(evidence?.limitations)
+    ? evidence.limitations.filter((item): item is string => typeof item === 'string').slice(0, 5)
+    : [];
+  return [
+    `Data Agent package status: ${packageStatus || 'received'}`,
+    summary ? `Data Agent summary: ${summary.slice(0, 1200)}` : '',
+    limitations.length ? `Limitations: ${limitations.join('; ')}` : '',
+    intake.masterResponse ? `Master Agent handover: ${intake.masterResponse.trim().slice(0, 1600)}` : '',
+  ].filter(Boolean).join('\n');
 }
 
 /**
@@ -59,6 +115,9 @@ export function formatOnboardingContext(data: OnboardingContextData): string {
           return `- ${entry.name} (${entry.category}, ${entry.period}, ${formatSize(Number(entry.size))})`;
         }).join('\n')
       : 'No evidence files uploaded yet.',
+    '',
+    '## Company-data handover',
+    formatDataIntake(data.dataIntake),
     '',
     '## Their own answers to the four brief questions',
     answers.length
