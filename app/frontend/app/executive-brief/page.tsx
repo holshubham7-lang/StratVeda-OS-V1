@@ -73,7 +73,7 @@ export default function ExecutiveBriefPage() {
   const [sequenceStatus, setSequenceStatus] = useState<CompletionStatus>("running");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const openDecisionCenter = useCallback(() => router.replace("/chat"), [router]);
+  const openDecisionCenter = useCallback(() => router.replace("/decision-center"), [router]);
 
   useEffect(() => {
     let active = true;

@@ -131,25 +131,17 @@ export class OnboardingService {
 
   async getProgress(userId: string) {
     const owner = asObjectId(userId);
-    const [hasCompany, problemInterview, dataIntake, hasStrategicContext, hasDecisionProfile] = await Promise.all([
+    const [hasCompany, problemInterview, dataIntake] = await Promise.all([
       this.companyDetails.exists({ userId: owner }),
       this.problemInterviews.findOne({ userId: owner }).select('status').lean().exec(),
       this.dataIntakes.findOne({ userId: owner }).select('status').lean().exec(),
-      this.strategicContexts.exists({ userId: owner }),
-      this.decisionProfiles.exists({ userId: owner }),
     ]);
     const dataIntakeComplete = dataIntake?.status === 'ready' || dataIntake?.status === 'skipped';
-    const nextRoute = !hasCompany
+    const nextRoute = !hasCompany || problemInterview?.status !== 'complete'
       ? '/business-fingerprint'
-      : problemInterview?.status !== 'complete'
-        ? '/business-fingerprint'
-        : !dataIntakeComplete
-          ? '/data-intake'
-          : !hasStrategicContext
-            ? '/strategic-context'
-            : !hasDecisionProfile
-              ? '/decision-profile'
-              : '/executive-brief';
+      : dataIntakeComplete
+        ? '/decision-center'
+        : '/data-intake';
     return { status: true, nextRoute };
   }
 }

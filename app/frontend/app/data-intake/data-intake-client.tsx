@@ -336,27 +336,24 @@ export function DataIntakeClient() {
     }
   }
 
+  function openDecisionCenter() {
+    localStorage.setItem("stratveda-onboarding-completed-step", "2");
+    localStorage.setItem("stratveda-onboarding-resume-route", "/decision-center");
+    beginOnboardingTransition();
+    router.push("/decision-center");
+  }
+
   async function handleSkip() {
     if (busy) return;
     setBusy(true);
     setNotice("");
     try {
       await postIntake("skip");
-      localStorage.setItem("stratveda-onboarding-completed-step", "2");
-      localStorage.setItem("stratveda-onboarding-resume-route", "/strategic-context");
-      beginOnboardingTransition();
-      router.push("/strategic-context");
+      openDecisionCenter();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "This step could not be skipped right now.");
       setBusy(false);
     }
-  }
-
-  function continueToStrategy() {
-    localStorage.setItem("stratveda-onboarding-completed-step", "2");
-    localStorage.setItem("stratveda-onboarding-resume-route", "/strategic-context");
-    beginOnboardingTransition();
-    router.push("/strategic-context");
   }
 
   const activeIndex = stageIndex(stage);
@@ -375,7 +372,7 @@ export function DataIntakeClient() {
             <div>
               <span className={styles.kicker}>COMPANY DATA</span>
               <h2>{done ? "Your data stage is complete" : failed ? "The pipeline needs attention" : "Add the files behind your numbers"}</h2>
-              <p>{done ? "Review what was handed over, then continue to strategic context." : "PDF, Word, Excel, CSV, JSON, text, and images up to 25 MB each. Legacy .doc and .xls are not accepted."}</p>
+              <p>{done ? "Review what was handed over, then open your Decision Center." : "PDF, Word, Excel, CSV, JSON, text, and images up to 25 MB each. Legacy .doc and .xls are not accepted."}</p>
             </div>
             <span className={styles.capacity}>{existingCount}/{MAX_FILES} files</span>
           </header>
@@ -553,8 +550,8 @@ export function DataIntakeClient() {
                 <button className={styles.secondary} type="button" onClick={() => void handleSkip()} disabled={busy}>Skip for now</button>
               )}
               {done && (
-                <button className={styles.primary} type="button" onClick={continueToStrategy}>
-                  Continue to strategic context <FontAwesomeIcon icon={faArrowRight} />
+                <button className={styles.primary} type="button" onClick={openDecisionCenter}>
+                  Open Decision Center <FontAwesomeIcon icon={faArrowRight} />
                 </button>
               )}
             </div>
