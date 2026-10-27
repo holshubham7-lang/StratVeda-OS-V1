@@ -16,13 +16,15 @@ const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 // Mirrors the Decision Workspace composer, which mirrors `acceptedEvidenceExtensions` on the API.
 const acceptedExtensions = [".doc", ".docx", ".xls", ".xlsx", ".csv", ".json", ".pdf", ".jpg", ".jpeg", ".png"];
+// At this width and above the chat is docked beside the brief; below it opens as a drawer.
+const DOCK_QUERY = "(min-width: 1200px)";
 const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 const suggestedQuestions = [
   "What should I do first this week?",
   "What are the biggest risks in this plan?",
   "Which data would make this brief stronger?",
-  "Explain the first decision focus in simple terms.",
+  "Explain the decision focus simply.",
 ];
 
 type BriefGeneration = {
@@ -35,6 +37,7 @@ type BriefGeneration = {
 
 type SavedFile = { name: string; source: "data" | "library"; status: string };
 type InterviewTurn = { question: string; answer: string };
+type Tab = "brief" | "files" | "interview";
 
 type CenterData = {
   companyName: string;
@@ -53,7 +56,6 @@ type ChatMessage = {
   content: string;
   status?: string;
   error?: string;
-  model?: string;
   attachments?: { name: string; size: number; readable: boolean }[];
   createdAt: string;
 };
@@ -87,7 +89,7 @@ function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-/** Markdown reduced to one readable line for the saved-context list. */
+/** Markdown reduced to readable text for the interview list. */
 function plain(source: string) {
   return source
     .replace(/\r\n/g, "\n")
@@ -123,11 +125,15 @@ function extensionOf(name: string) {
   return index >= 0 ? name.slice(index).toLowerCase() : "";
 }
 
-function fileStatusLabel(file: SavedFile) {
-  if (file.source === "library") return "Library";
-  if (file.status === "ready") return "Ready";
-  if (file.status === "blocked" || file.status === "failed") return "Excluded";
-  return "Processing";
+function fileBadge(name: string) {
+  return extensionOf(name).replace(".", "").toUpperCase().slice(0, 4) || "FILE";
+}
+
+function fileStatus(file: SavedFile) {
+  if (file.source === "library") return { label: "Added in chat", tone: "" };
+  if (file.status === "ready") return { label: "Used in your brief", tone: styles.isReady };
+  if (file.status === "blocked" || file.status === "failed") return { label: "Excluded", tone: styles.isExcluded };
+  return { label: "Processing", tone: "" };
 }
 
 /** Pairs each interview-agent question with the answer that followed it. */
@@ -150,10 +156,11 @@ function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-/** `startWithChat` opens the ask panel straight away (the legacy /chat route). */
+/** `startWithChat` opens the chat straight away on small screens (the legacy /chat route). */
 export function DecisionCenterDashboard({ startWithChat = false }: { startWithChat?: boolean }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const chatRef = useRef<HTMLElement>(null);
+  const tabPanelRef = useRef<HTMLDivElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -162,8 +169,9 @@ export function DecisionCenterDashboard({ startWithChat = false }: { startWithCh
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [briefMessage, setBriefMessage] = useState("");
-  const [isChatOpen, setIsChatOpen] = useState(startWithChat);
-  const [isContextOpen, setIsContextOpen] = useState(true);
+  const [tab, setTab] = useState<Tab>("brief");
+  const [isDocked, setIsDocked] = useState(true);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(startWithChat);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [threadId, setThreadId] = useState("");
   const [draft, setDraft] = useState("");
@@ -207,41 +215,49 @@ export function DecisionCenterDashboard({ startWithChat = false }: { startWithCh
     void load();
   }, [load]);
 
+  useEffect(() => {
+    const query = window.matchMedia(DOCK_QUERY);
+    const sync = () => setIsDocked(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+
+  const chatVisible = isDocked || isDrawerOpen;
+
   useIsomorphicLayoutEffect(() => {
     if (!rootRef.current || prefersReducedMotion()) return;
     const context = gsap.context(() => {
       gsap.timeline({ defaults: { ease: "power3.out" } })
-        .from("[data-center-heading] > *", { opacity: 0, y: 14, duration: 0.5, stagger: 0.07 })
-        .from("[data-center-brief]", { opacity: 0, y: 20, duration: 0.6 }, "-=0.25");
+        .from("[data-center-heading] > *", { opacity: 0, y: 12, duration: 0.45, stagger: 0.06 })
+        .from("[data-center-brief]", { opacity: 0, y: 18, duration: 0.55 }, "-=0.2")
+        .from("[data-center-chat]", { opacity: 0, x: 24, duration: 0.55 }, "<0.08");
     }, rootRef);
     return () => context.revert();
   }, []);
 
-  // The brief text fades in once it arrives, so the card does not pop from a placeholder.
+  // Switching tabs cross-fades the panel instead of snapping.
   useEffect(() => {
-    if (isLoading || !rootRef.current || prefersReducedMotion()) return;
-    const body = rootRef.current.querySelector("[data-center-brief-body]");
-    if (body) gsap.from(body, { opacity: 0, y: 8, duration: 0.5, ease: "power2.out" });
-  }, [isLoading]);
+    const panel = tabPanelRef.current;
+    if (!panel || prefersReducedMotion()) return;
+    gsap.fromTo(panel, { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.3, ease: "power2.out" });
+  }, [tab, isLoading]);
 
-  // Opening the chat slides its panel in beside the brief (below it on narrow
-  // screens), keeps any earlier conversation, and moves focus into the composer.
+  // On small screens the chat slides in as a drawer and keeps the page behind it still.
   useIsomorphicLayoutEffect(() => {
-    if (!isChatOpen) {
-      renderedCount.current = 0;
-      return;
-    }
+    if (isDocked || !isDrawerOpen) return;
     const panel = chatRef.current;
-    const stacked = window.matchMedia("(max-width: 1180px)").matches;
-    renderedCount.current = messages.length + (isSending ? 1 : 0);
-    if (threadRef.current) threadRef.current.scrollTop = messages.length ? threadRef.current.scrollHeight : 0;
-    if (panel && !prefersReducedMotion() && !startWithChat) {
-      gsap.fromTo(panel, stacked ? { opacity: 0, y: 18 } : { opacity: 0, x: 40 }, { opacity: 1, x: 0, y: 0, duration: 0.55, ease: "power3.out" });
-      gsap.from(panel.querySelectorAll("[data-chat-reveal]"), { opacity: 0, y: 8, duration: 0.35, stagger: 0.05, delay: 0.2, ease: "power2.out" });
-    }
-    if (stacked) panel?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
+    if (panel && !prefersReducedMotion()) gsap.fromTo(panel, { x: "100%" }, { x: "0%", duration: 0.45, ease: "power3.out" });
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     inputRef.current?.focus({ preventScroll: true });
-  }, [isChatOpen]);
+    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setIsDrawerOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [isDrawerOpen, isDocked]);
 
   // New messages slide in; ones already on screen stay still.
   useIsomorphicLayoutEffect(() => {
@@ -251,15 +267,18 @@ export function DecisionCenterDashboard({ startWithChat = false }: { startWithCh
     const fresh = Array.from(items).slice(renderedCount.current);
     renderedCount.current = items.length;
     if (fresh.length && !prefersReducedMotion()) {
-      gsap.from(fresh, { opacity: 0, y: 12, duration: 0.4, stagger: 0.08, ease: "power2.out" });
+      gsap.from(fresh, { opacity: 0, y: 10, duration: 0.35, stagger: 0.06, ease: "power2.out" });
     }
     if (items.length) thread.scrollTo({ top: thread.scrollHeight, behavior: prefersReducedMotion() ? "auto" : "smooth" });
-  }, [messages, isSending]);
+  }, [messages, isSending, chatVisible]);
 
-  // Saved context steps aside once the conversation starts, to give the thread room.
+  // The composer grows with its text up to a few lines.
   useEffect(() => {
-    if (messages.length === 1) setIsContextOpen(false);
-  }, [messages.length]);
+    const input = inputRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 168)}px`;
+  }, [draft, chatVisible]);
 
   const generateBrief = async () => {
     if (isGenerating) return;
@@ -304,7 +323,7 @@ export function DecisionCenterDashboard({ startWithChat = false }: { startWithCh
       const stored = (Array.isArray(result?.data) ? result.data : []) as Attachment[];
       setAttachments((current) => [...current, ...stored].slice(0, MAX_ATTACHMENTS));
       setChatNotice(rejected.length ? `${rejected.join(" ")} The rest was attached.` : "");
-      // Attached files also join the evidence library, so the saved context re-reads.
+      // Attached files also join the evidence library, so the Files tab re-reads.
       void load();
     } catch (error) {
       setChatNotice(error instanceof Error ? error.message : "Those files could not be attached.");
@@ -367,8 +386,12 @@ export function DecisionCenterDashboard({ startWithChat = false }: { startWithCh
     setDraft("");
     setAttachments([]);
     setChatNotice("");
-    setIsContextOpen(true);
     inputRef.current?.focus();
+  };
+
+  const openChat = () => {
+    if (isDocked) inputRef.current?.focus();
+    else setIsDrawerOpen(true);
   };
 
   const generation = data.generation;
@@ -378,8 +401,12 @@ export function DecisionCenterDashboard({ startWithChat = false }: { startWithCh
   const briefIsReady = briefFromMaster || (generation?.status === "ok" && Boolean(generation.content));
   const briefSource = briefFromMaster ? data.masterResponse : generation?.content ?? "";
   const briefDate = formatDate(briefFromMaster ? data.masterCompletedAt : generation?.generatedAt);
-  const questionCount = messages.filter((entry) => entry.role === "user").length;
-  const hasSavedContext = Boolean(data.files.length || data.interview.length || data.problemStatement || briefIsReady);
+  const canSend = draft.trim().length >= 2 && !isSending && !isUploading;
+  const tabs: { key: Tab; label: string; count?: number }[] = [
+    { key: "brief", label: "Decision brief" },
+    { key: "files", label: "Files", count: data.files.length },
+    { key: "interview", label: "Interview", count: data.interview.length },
+  ];
 
   return (
     <>
@@ -388,266 +415,278 @@ export function DecisionCenterDashboard({ startWithChat = false }: { startWithCh
       <div className="decision-center-layout">
         <DecisionCenterSidebar />
 
-        <main id="decision-center-main" className={`decision-center-main ${styles.main}${isChatOpen ? ` ${styles.isWide}` : ""}`} ref={rootRef}>
-          <div className="decision-center-heading" data-center-heading>
-            <div>
-              <p className="decision-center-eyebrow">STRATVEDA <span>·</span> DECISION CENTER</p>
-              <h1>Welcome to your Decision Center</h1>
-              <p>{isLoading ? "Loading your saved context…" : `Here is your decision brief for ${data.companyName}. Ask your agent anything about it.`}</p>
-            </div>
-            <Link className="decision-center-edit" href="/business-fingerprint"><Icon name="brain" size={16} /> Review your profile</Link>
-          </div>
-
-          <div className={isChatOpen ? styles.split : styles.single}>
-            <section className={styles.briefCard} aria-labelledby="decision-agent-brief-title" data-center-brief>
-              <header className={styles.briefHeader}>
-                <span className={styles.briefMark} aria-hidden="true"><Icon name="sparkles" size={18} /></span>
-                <div className={styles.briefTitle}>
-                  <span className={styles.kicker}>{briefIsReady ? (briefFromMaster ? "GENERATED BY YOUR MASTER AGENT" : "GENERATED BY YOUR BRIEF AGENT") : "BRIEF AGENT"}</span>
-                  <h2 id="decision-agent-brief-title">Your decision brief</h2>
+        <main id="decision-center-main" className={`decision-center-main ${styles.main}`} ref={rootRef}>
+          <div className={styles.layout}>
+            <div className={styles.content}>
+              <header className={styles.heading} data-center-heading>
+                <div>
+                  <p className="decision-center-eyebrow">STRATVEDA <span>·</span> DECISION CENTER</p>
+                  <h1>Your decision brief</h1>
+                  <p>{isLoading ? "Loading your saved context…" : `Prepared for ${data.companyName}. Read it here, then ask your agent anything about it.`}</p>
                 </div>
-                <div className={styles.briefHeaderActions}>
-                  {briefIsReady
-                    ? <span className={styles.badge}><Icon name="check" size={13} /> {briefDate ? `Ready · ${briefDate}` : "Ready"}</span>
-                    : <button className={styles.secondaryButton} type="button" onClick={generateBrief} disabled={isGenerating || isLoading}>{isGenerating ? "Generating…" : generation?.status === "failed" ? "Retry brief" : "Generate brief"}</button>}
-                  {!isChatOpen && (
-                    <button className={styles.primaryButton} type="button" onClick={() => setIsChatOpen(true)}>
-                      <Icon name="sparkles" size={16} /> Ask your agent
-                    </button>
-                  )}
-                </div>
+                <Link className={styles.profileLink} href="/business-fingerprint"><Icon name="brain" size={15} /> Review profile</Link>
               </header>
 
-              <div className={styles.briefBody} data-center-brief-body>
-                {isLoading ? (
-                  <div className={styles.skeleton} aria-label="Loading your brief">
-                    <span style={{ width: "92%" }} /><span style={{ width: "84%" }} /><span style={{ width: "88%" }} /><span style={{ width: "62%" }} />
-                  </div>
-                ) : briefIsReady ? (
-                  <AgentOutput source={briefSource} />
-                ) : (
-                  <p className={styles.fallback}>
-                    {briefMessage
-                      || generation?.error
-                      || "Your decision brief is not ready yet. Finish your company data step so the Master Agent can prepare it, or generate one here."}
-                  </p>
-                )}
-              </div>
-
-              {!isChatOpen && (
-                <div className={styles.askCta}>
-                  <span className={styles.askIcon} aria-hidden="true"><Icon name="chat" size={20} /></span>
-                  <div className={styles.askCopy}>
-                    <h2>Have a question about your brief?</h2>
-                    <p>Open a workspace beside your brief. Ask follow-ups, attach files, and see the saved context your agent reasons over.</p>
-                  </div>
-                  <button className={styles.ghostButton} type="button" onClick={() => setIsChatOpen(true)}>
-                    Ask your agent <Icon name="arrow-right" size={14} />
-                  </button>
+              <section className={styles.briefCard} aria-label="Decision brief and saved context" data-center-brief>
+                <div className={styles.tabs} role="tablist" aria-label="Brief sections">
+                  {tabs.map((item) => (
+                    <button
+                      key={item.key}
+                      className={`${styles.tab}${tab === item.key ? ` ${styles.isActive}` : ""}`}
+                      type="button"
+                      role="tab"
+                      id={`center-tab-${item.key}`}
+                      aria-selected={tab === item.key}
+                      aria-controls="center-tab-panel"
+                      onClick={() => setTab(item.key)}
+                    >
+                      {item.label}
+                      {item.count !== undefined && <span className={styles.tabCount}>{item.count}</span>}
+                    </button>
+                  ))}
                 </div>
-              )}
-            </section>
 
-            {isChatOpen && (
-              <section className={styles.chatPanel} ref={chatRef} aria-labelledby="ask-chat-title">
-                <header className={styles.chatHeader}>
-                  <div className={styles.chatHeading}>
-                    <p className="decision-center-eyebrow">STRATVEDA <span>·</span> DECISION WORKSPACE</p>
-                    <h2 id="ask-chat-title">Ask your decision brief</h2>
-                    <p>Keep the thread going on anything from your saved business context.</p>
-                  </div>
-                  <div className={styles.chatActions}>
-                    <span className={questionCount ? "decision-workspace-status is-live" : "decision-workspace-status"}>
-                      <i /> {questionCount ? `${questionCount} QUESTION${questionCount === 1 ? "" : "S"} SAVED` : "READY TO ASK"}
-                    </span>
-                    <div className={styles.chatButtons}>
-                      {(questionCount > 0 || threadId) && (
-                        <button className="decision-workspace-new" type="button" onClick={startNewChat} disabled={isSending}>
-                          <Icon name="plus" size={13} /> New conversation
+                <div className={styles.tabPanel} id="center-tab-panel" role="tabpanel" aria-labelledby={`center-tab-${tab}`} ref={tabPanelRef}>
+                  {tab === "brief" && (
+                    <>
+                      <div className={styles.briefMeta}>
+                        <span className={styles.briefSource}>
+                          <span className={styles.sourceMark} aria-hidden="true"><Icon name="sparkles" size={14} /></span>
+                          {briefIsReady ? (briefFromMaster ? "Written by your Master Agent" : "Written by your brief agent") : "Brief agent"}
+                        </span>
+                        {briefIsReady
+                          ? <span className={styles.readyBadge}><Icon name="check" size={12} /> {briefDate ? `Ready · ${briefDate}` : "Ready"}</span>
+                          : <button className={styles.smallButton} type="button" onClick={generateBrief} disabled={isGenerating || isLoading}>{isGenerating ? "Generating…" : generation?.status === "failed" ? "Retry brief" : "Generate brief"}</button>}
+                      </div>
+                      {isLoading ? (
+                        <div className={styles.skeleton} aria-label="Loading your brief">
+                          <span style={{ width: "92%" }} /><span style={{ width: "84%" }} /><span style={{ width: "88%" }} /><span style={{ width: "62%" }} />
+                        </div>
+                      ) : briefIsReady ? (
+                        <div className={styles.document}><AgentOutput source={briefSource} /></div>
+                      ) : (
+                        <p className={styles.empty}>
+                          {briefMessage
+                            || generation?.error
+                            || "Your decision brief is not ready yet. Finish your company data step so the Master Agent can prepare it, or generate one here."}
+                        </p>
+                      )}
+                      {!isDocked && (
+                        <button className={styles.inlineAsk} type="button" onClick={openChat}>
+                          <Icon name="chat" size={16} /> Ask your agent about this brief
                         </button>
                       )}
-                      {threadId && <Link className={styles.iconButton} href="/decision-workspace" aria-label="Open in Decision Workspace" title="Open in Decision Workspace"><Icon name="arrow-up-right" size={15} /></Link>}
-                      <button className={styles.iconButton} type="button" onClick={() => setIsChatOpen(false)} aria-label="Close workspace panel" title="Close">
+                    </>
+                  )}
+
+                  {tab === "files" && (
+                    <>
+                      <p className={styles.panelIntro}>Files your agent can draw on. Attach more from the chat with <strong>+</strong>.</p>
+                      {data.files.length ? (
+                        <ul className={styles.fileList}>
+                          {data.files.map((file, index) => {
+                            const status = fileStatus(file);
+                            return (
+                              <li key={`${file.source}-${file.name}-${index}`}>
+                                <span className={styles.fileBadge}>{fileBadge(file.name)}</span>
+                                <span className={styles.fileName}>{file.name}</span>
+                                <span className={`${styles.fileStatus}${status.tone ? ` ${status.tone}` : ""}`}>{status.label}</span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : (
+                        <p className={styles.empty}>{isLoading ? "Reading your files…" : "No files yet. Attach one in the chat, or add company data from your profile."}</p>
+                      )}
+                    </>
+                  )}
+
+                  {tab === "interview" && (
+                    <>
+                      <p className={styles.panelIntro}>What the discovery agent asked, and how you answered.</p>
+                      {data.problemStatement && (
+                        <div className={styles.problem}>
+                          <span>Your problem statement</span>
+                          <p>{data.problemStatement}</p>
+                        </div>
+                      )}
+                      {data.interview.length ? (
+                        <ol className={styles.questions}>
+                          {data.interview.map((turn, index) => (
+                            <li key={`${index}-${turn.question.slice(0, 24)}`}>
+                              <span className={styles.questionNumber}>{index + 1}</span>
+                              <div>
+                                <p className={styles.question}>{turn.question}</p>
+                                {turn.answer && <p className={styles.answer}>{turn.answer}</p>}
+                              </div>
+                            </li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <p className={styles.empty}>{isLoading ? "Reading your interview…" : "No interview questions saved yet."}</p>
+                      )}
+                    </>
+                  )}
+                </div>
+              </section>
+            </div>
+
+            {!isDocked && isDrawerOpen && <div className={styles.backdrop} onClick={() => setIsDrawerOpen(false)} aria-hidden="true" />}
+
+            {chatVisible && (
+              <aside
+                className={`${styles.chat}${isDocked ? "" : ` ${styles.isDrawer}`}`}
+                ref={chatRef}
+                aria-labelledby="ask-chat-title"
+                role={isDocked ? undefined : "dialog"}
+                aria-modal={isDocked ? undefined : true}
+                data-center-chat
+              >
+                <header className={styles.chatHeader}>
+                  <span className={styles.avatar} aria-hidden="true">S</span>
+                  <div className={styles.chatTitle}>
+                    <h2 id="ask-chat-title">Ask StratVeda</h2>
+                    <p><i aria-hidden="true" /> Knows your brief, files and interview</p>
+                  </div>
+                  <div className={styles.chatTools}>
+                    {messages.length > 0 && (
+                      <button className={styles.iconButton} type="button" onClick={startNewChat} disabled={isSending} aria-label="New conversation" title="New conversation">
+                        <Icon name="plus" size={16} />
+                      </button>
+                    )}
+                    {threadId && (
+                      <Link className={styles.iconButton} href="/decision-workspace" aria-label="Open in Decision Workspace" title="Open in Decision Workspace">
+                        <Icon name="arrow-up-right" size={15} />
+                      </Link>
+                    )}
+                    {!isDocked && (
+                      <button className={styles.iconButton} type="button" onClick={() => setIsDrawerOpen(false)} aria-label="Close chat" title="Close">
                         <Icon name="close" size={15} />
                       </button>
-                    </div>
+                    )}
                   </div>
                 </header>
 
-                <section className={`${styles.context}${isContextOpen ? ` ${styles.isOpen}` : ""}`} aria-labelledby="saved-context-title" data-chat-reveal>
-                  <button className={styles.contextToggle} type="button" onClick={() => setIsContextOpen((open) => !open)} aria-expanded={isContextOpen} aria-controls="saved-context-body">
-                    <span className={styles.contextLabel}>
-                      <span className="decision-center-eyebrow" id="saved-context-title">SAVED CONTEXT</span>
-                      <span className={hasSavedContext ? "decision-workspace-side-tag is-connected" : "decision-workspace-side-tag"}>
-                        <Icon name={hasSavedContext ? "plug-connected" : "plug"} size={13} /> {isLoading ? "CHECKING" : hasSavedContext ? "CONNECTED" : "NOT CONNECTED"}
-                      </span>
-                    </span>
-                    <span className={styles.contextSummary}>
-                      {data.files.length} {data.files.length === 1 ? "file" : "files"} · {data.interview.length} interview {data.interview.length === 1 ? "question" : "questions"}
-                      <Icon name={isContextOpen ? "arrow-up" : "arrow-right"} size={13} />
-                    </span>
-                  </button>
-
-                  {isContextOpen && (
-                    <div className={styles.contextBody} id="saved-context-body">
-                      <div className={styles.contextGroup}>
-                        <h3>Uploaded files</h3>
-                        {data.files.length ? (
-                          <ul className={styles.fileChips}>
-                            {data.files.map((file, index) => (
-                              <li key={`${file.source}-${file.name}-${index}`} className={file.status === "blocked" || file.status === "failed" ? styles.isExcluded : ""}>
-                                <Icon name="report" size={13} />
-                                <span className={styles.fileName}>{file.name}</span>
-                                <span className={styles.fileTag}>{fileStatusLabel(file)}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <p className={styles.contextEmpty}>No files yet. Use + below to attach one to your question.</p>
-                        )}
-                      </div>
-
-                      <div className={styles.contextGroup}>
-                        <h3>Discovery interview</h3>
-                        {data.problemStatement && (
-                          <p className={styles.problem}><strong>Your problem statement</strong>{data.problemStatement}</p>
-                        )}
-                        {data.interview.length ? (
-                          <ol className={styles.questions}>
-                            {data.interview.map((turn, index) => (
-                              <li key={`${index}-${turn.question.slice(0, 24)}`}>
-                                <span className={styles.questionNumber}>{index + 1}</span>
-                                <div>
-                                  <p className={styles.question}>{turn.question}</p>
-                                  {turn.answer && <p className={styles.answer}>{turn.answer}</p>}
-                                </div>
-                              </li>
-                            ))}
-                          </ol>
-                        ) : (
-                          <p className={styles.contextEmpty}>{isLoading ? "Reading your interview…" : "No interview questions saved yet."}</p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </section>
-
                 <div className={styles.thread} ref={threadRef} aria-live="polite">
                   {!messages.length && !isSending ? (
-                    <div className={styles.empty}>
-                      <span className="decision-workspace-empty-mark" aria-hidden="true">🤖</span>
-                      <strong>How can I help you today?</strong>
-                      <p>Ask about your brief. Each question and answer is saved to your Decision Workspace.</p>
+                    <div className={styles.welcome}>
+                      <h3>Hi, how can I help?</h3>
+                      <p>Ask about your brief, a next step, or a risk. Answers are saved to your Decision Workspace.</p>
                       <div className={styles.suggestions}>
                         {suggestedQuestions.map((question) => (
-                          <button key={question} type="button" data-chat-reveal onClick={() => void sendMessage(question)} disabled={isUploading}>
-                            {question} <Icon name="arrow-right" size={13} />
+                          <button key={question} type="button" onClick={() => void sendMessage(question)} disabled={isUploading}>
+                            {question}
                           </button>
                         ))}
                       </div>
                     </div>
                   ) : (
-                    <ol className="decision-workspace-messages">
+                    <ol className={styles.messages}>
                       {messages.map((message, index) => {
                         const isUser = message.role !== "assistant";
                         return (
-                          <li className={`decision-workspace-message ${isUser ? "is-you" : "is-agent"}`} key={`${message.createdAt}-${index}`} data-chat-message>
-                            <div className="decision-workspace-bubble">
+                          <li className={`${styles.message} ${isUser ? styles.isUser : styles.isAgent}`} key={`${message.createdAt}-${index}`} data-chat-message>
+                            <div className={styles.bubble}>
                               {isUser ? (
                                 <>
                                   <p>{message.content}</p>
                                   {message.attachments?.length ? (
-                                    <p className="decision-workspace-bubble-files">
+                                    <span className={styles.bubbleFiles}>
                                       {message.attachments.map((file, fileIndex) => (
-                                        <span key={`${file.name}-${fileIndex}`}>
-                                          <Icon name="report" size={12} /> {file.name}{file.readable ? "" : " · name only"}
-                                        </span>
+                                        <span key={`${file.name}-${fileIndex}`}><Icon name="report" size={12} /> {file.name}</span>
                                       ))}
-                                    </p>
+                                    </span>
                                   ) : null}
                                 </>
                               ) : message.status === "failed"
-                                ? <p className="decision-workspace-error"><Icon name="plug" size={14} /> {message.error || "The agent could not answer."}</p>
+                                ? <p className={styles.failed}>{message.error || "The agent could not answer."} Try asking again.</p>
                                 : <AgentOutput source={message.content} />}
                             </div>
-                            <p className="decision-workspace-message-meta">
-                              {isUser ? "You" : "Brief agent"} · {formatClock(message.createdAt)}
-                            </p>
+                            <span className={styles.meta}>{isUser ? "You" : "StratVeda"} · {formatClock(message.createdAt)}</span>
                           </li>
                         );
                       })}
+                      {isSending && (
+                        <li className={`${styles.message} ${styles.isAgent}`} data-chat-message>
+                          <div className={`${styles.bubble} ${styles.typing}`} role="status" aria-label="StratVeda is answering">
+                            <i /><i /><i />
+                          </div>
+                        </li>
+                      )}
                     </ol>
                   )}
-                  {isSending && (
-                    <p className="decision-workspace-thinking" data-chat-message><Icon name="chat" size={14} /> Your brief agent is answering…</p>
-                  )}
-                  {chatNotice && <p className="decision-workspace-notice" role="alert">{chatNotice}</p>}
                 </div>
 
-                {attachments.length > 0 && (
-                  <div className="decision-workspace-tray" aria-label="Files attached to your next question">
-                    {attachments.map((file) => (
-                      <span className={`decision-workspace-chip-file${file.readable ? " is-readable" : ""}`} key={file.id}>
-                        <Icon name="report" size={13} />
-                        <span className="decision-workspace-chip-file-name">{file.name}</span>
-                        <span className="decision-workspace-chip-file-meta">
-                          {formatBytes(file.size)}{file.readable ? " · agent can read" : " · name only"}
+                <div className={styles.composerArea}>
+                  {chatNotice && <p className={styles.notice} role="alert">{chatNotice}</p>}
+                  {attachments.length > 0 && (
+                    <div className={styles.tray} aria-label="Files attached to your next question">
+                      {attachments.map((file) => (
+                        <span className={styles.trayFile} key={file.id}>
+                          <span className={styles.trayBadge}>{fileBadge(file.name)}</span>
+                          <span className={styles.trayName}>{file.name}</span>
+                          <span className={styles.trayMeta}>{formatBytes(file.size)}</span>
+                          <button type="button" onClick={() => setAttachments((current) => current.filter((item) => item.id !== file.id))} disabled={isUploading} aria-label={`Remove ${file.name}`}>
+                            <Icon name="close" size={11} />
+                          </button>
                         </span>
-                        <button className="decision-workspace-chip-file-remove" type="button" onClick={() => setAttachments((current) => current.filter((item) => item.id !== file.id))} disabled={isUploading} aria-label={`Detach ${file.name}`}>
-                          <Icon name="close" size={12} />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                <div className={`decision-workspace-composer ${styles.composer}`}>
-                  <input
-                    ref={fileInput}
-                    className="decision-workspace-file-input"
-                    type="file"
-                    multiple
-                    accept={acceptedExtensions.join(",")}
-                    onChange={(event) => {
-                      if (event.target.files) void uploadFiles(event.target.files);
-                      event.target.value = "";
-                    }}
-                    aria-label="Attach evidence files to your question"
-                  />
-                  <button
-                    className="decision-workspace-attach"
-                    type="button"
-                    onClick={() => fileInput.current?.click()}
-                    disabled={isUploading || attachments.length >= MAX_ATTACHMENTS}
-                    aria-label={isUploading ? "Uploading your files" : "Attach evidence files"}
-                    title={isUploading ? "Uploading…" : `Attach up to ${MAX_ATTACHMENTS} files`}
-                  >
-                    <Icon name="plus" size={17} />
-                  </button>
-                  <textarea
-                    ref={inputRef}
-                    className="decision-workspace-input"
-                    rows={3}
-                    maxLength={MAX_MESSAGE_CHARS}
-                    value={draft}
-                    placeholder="Ask about your revenue decisions…"
-                    aria-label="Message your decision workspace"
-                    onChange={(event) => setDraft(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                        event.preventDefault();
-                        void sendMessage();
-                      }
-                    }}
-                  />
-                  <button className="decision-workspace-send" type="button" onClick={() => void sendMessage()} disabled={isSending || isUploading || draft.trim().length < 2} aria-label="Send message">
-                    <Icon name="arrow-up" size={17} />
-                  </button>
+                      ))}
+                    </div>
+                  )}
+                  <form className={styles.composer} onSubmit={(event) => { event.preventDefault(); void sendMessage(); }}>
+                    <input
+                      ref={fileInput}
+                      className={styles.fileInput}
+                      type="file"
+                      multiple
+                      accept={acceptedExtensions.join(",")}
+                      onChange={(event) => {
+                        if (event.target.files) void uploadFiles(event.target.files);
+                        event.target.value = "";
+                      }}
+                      aria-label="Attach files to your question"
+                    />
+                    <button
+                      className={styles.attach}
+                      type="button"
+                      onClick={() => fileInput.current?.click()}
+                      disabled={isUploading || attachments.length >= MAX_ATTACHMENTS}
+                      aria-label={isUploading ? "Uploading your files" : "Attach files"}
+                      title={isUploading ? "Uploading…" : `Attach up to ${MAX_ATTACHMENTS} files`}
+                    >
+                      {isUploading ? <span className={styles.spinner} aria-hidden="true" /> : <Icon name="plus" size={18} />}
+                    </button>
+                    <label className={styles.srOnly} htmlFor="decision-center-question">Ask about your decision brief</label>
+                    <textarea
+                      id="decision-center-question"
+                      ref={inputRef}
+                      rows={1}
+                      maxLength={MAX_MESSAGE_CHARS}
+                      value={draft}
+                      placeholder="Ask about your brief…"
+                      onChange={(event) => setDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                          event.preventDefault();
+                          void sendMessage();
+                        }
+                      }}
+                    />
+                    <button className={styles.send} type="submit" disabled={!canSend} aria-label="Send question">
+                      <Icon name="arrow-up" size={18} />
+                    </button>
+                  </form>
+                  <p className={styles.caption}>Enter to send · Shift + Enter for a new line · Verify critical figures.</p>
                 </div>
-                <p className={`decision-workspace-caption ${styles.caption}`}>AI-powered insights help you make better decisions. <span className="decision-workspace-caption-caution">Verify critical information when needed.</span></p>
-              </section>
+              </aside>
             )}
           </div>
+
+          {!isDocked && !isDrawerOpen && (
+            <button className={styles.fab} type="button" onClick={openChat}>
+              <Icon name="chat" size={18} /> Ask StratVeda
+            </button>
+          )}
         </main>
       </div>
       <WelcomeCopyrightFooter />
